@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Air Canvas Meeting</title>
+
+    <link
+        rel="stylesheet"
+        href="style.css"
+    >
+
+</head>
+
+
+<body>
+
+<div class="app">
+
+
+    <!-- =====================================================
+         HOME SCREEN
+         ===================================================== -->
+
+    <section
+        id="homeScreen"
+        class="screen"
+    >
+
+        <div class="home-card">
+
+            <h1>Air Canvas</h1>
+
+            <p class="subtitle">
+                Interactive video meetings with
+                gesture-based air writing
+            </p>
+
+
+            <!-- ================================
+                 USERNAME
+                 ================================ -->
+
+            <input
+                id="userNameInput"
+                type="text"
+                placeholder="Enter your name"
+                autocomplete="name"
+                maxlength="30"
+            >
+
+
+            <!-- ================================
+                 START CAMERA
+                 ================================ -->
+
+            <button
+                id="homeStartCamera"
+                class="primary-button"
+            >
+                🎥 Start Camera
+            </button>
+
+
+            <div
+                id="cameraStatus"
+                class="camera-status"
+            >
+                Camera is off
+            </div>
+
+
+            <!-- ================================
+                 CREATE MEETING
+                 ================================ -->
+
+            <button
+                id="createMeetingButton"
+                class="primary-button"
+            >
+                Create Meeting
+            </button>
+
+
+            <div class="divider">
+                <span>OR</span>
+            </div>
+
+
+            <!-- ================================
+                 MEETING ID
+                 ================================ -->
+
+            <input
+                id="meetingIdInput"
+                type="text"
+                placeholder="Enter Meeting ID"
+                autocomplete="off"
+            >
+
+
+            <button
+                id="joinMeetingButton"
+                class="secondary-button"
+            >
+                Join Meeting
+            </button>
+
+        </div>
+
+    </section>
+
+
+
+    <!-- =====================================================
+         MEETING SCREEN
+         ===================================================== -->
+
+    <section
+        id="meetingScreen"
+        class="screen hidden"
+    >
+
+
+        <!-- =================================================
+             HEADER
+             ================================================= -->
+
+        <header class="header">
+
+            <div class="header-left">
+
+                <h1>
+                    Air Canvas
+                </h1>
+
+
+                <div
+                    id="meetingIdDisplay"
+                    class="meeting-id-display"
+                >
+                    Meeting ID: ------
+                </div>
+
+            </div>
+
+
+            <div
+                id="connectionStatus"
+                class="connection-status"
+            >
+                Backend: Checking...
+            </div>
+
+        </header>
+
+
+
+        <!-- =================================================
+             MEETING AREA
+             ================================================= -->
+
+        <main class="meeting-main">
+
+
+            <!-- =============================================
+                 MEETING ID BANNER
+                 ============================================= -->
+
+            <div
+                id="meetingBanner"
+                class="meeting-banner"
+            >
+
+                <span>
+                    Meeting ID
+                </span>
+
+
+                <strong
+                    id="meetingIdLarge"
+                >
+                    ------
+                </strong>
+
+
+                <button
+                    id="copyMeetingId"
+                    class="copy-button"
+                >
+                    Copy ID
+                </button>
+
+            </div>
+
+
+
+            <!-- =============================================
+                 PARTICIPANTS
+                 ============================================= -->
+
+            <div class="participants-grid">
+
+
+                <!-- =========================================
+                     LOCAL PARTICIPANT
+                     ========================================= -->
+
+                <div class="participant-card">
+
+                    <div
+                        id="localParticipantLabel"
+                        class="participant-label"
+                    >
+                        You
+                    </div>
+
+
+                    <div class="video-container">
+
+                        <video
+                            id="video"
+                            autoplay
+                            playsinline
+                            muted
+                        ></video>
+
+
+                        <!-- Air Canvas directly over video -->
+
+                        <canvas
+                            id="airCanvas"
+                        ></canvas>
+
+
+                        <!-- Hand landmarks -->
+
+                        <canvas
+                            id="landmarkCanvas"
+                        ></canvas>
+
+                    </div>
+
+                </div>
+
+
+
+                <!-- =========================================
+                     REMOTE PARTICIPANT
+                     ========================================= -->
+
+                <div class="participant-card">
+
+                    <div
+                        id="remoteParticipantLabel"
+                        class="participant-label"
+                    >
+                        Participant
+                    </div>
+
+
+                    <div
+                        class="remote-video-container"
+                    >
+
+                        <div
+                            id="waitingParticipant"
+                            class="waiting-participant"
+                        >
+
+                            <div
+                                class="participant-avatar"
+                            >
+                                👤
+                            </div>
+
+
+                            <span>
+                                Waiting for participant...
+                            </span>
+
+                        </div>
+
+
+                        <video
+                            id="remoteVideo"
+                            autoplay
+                            playsinline
+                        ></video>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+
+
+            <!-- =============================================
+                 STATUS
+                 ============================================= -->
+
+            <div class="status-panel">
+
+                <div>
+
+                    <span>
+                        Gesture
+                    </span>
+
+
+                    <strong id="gesture">
+                        NO GESTURE
+                    </strong>
+
+                </div>
+
+
+                <div>
+
+                    <span>
+                        Confidence
+                    </span>
+
+
+                    <strong id="confidence">
+                        --
+                    </strong>
+
+                </div>
+
+            </div>
+
+
+
+            <!-- =============================================
+                 CONTROLS
+                 ============================================= -->
+
+            <div class="meeting-controls">
+
+                <!-- Start Camera remains available -->
+
+                <button
+                    id="startCamera"
+                    class="control-button primary-control"
+                >
+                    Start Camera
+                </button>
+
+
+                <!-- Request Draw Permission (Guest only) -->
+
+                <button
+                    id="requestDrawPermission"
+                    class="control-button permission-button"
+                    style="background-color: #6c63ff; color: white;"
+                >
+                    ✏️ Request Draw
+                </button>
+
+
+                <!-- Clear Canvas -->
+
+                <button
+                    id="clearCanvas"
+                    class="control-button"
+                >
+                    🧹 Clear
+                </button>
+
+
+                <!-- Microphone -->
+
+                <button
+                    id="muteButton"
+                    class="control-button"
+                >
+                    🎤 Mic
+                </button>
+
+
+                <!-- Camera ON/OFF -->
+
+                <button
+                    id="cameraButton"
+                    class="control-button"
+                >
+                    📹 Camera
+                </button>
+
+
+                <!-- Leave -->
+
+                <button
+                    id="leaveMeeting"
+                    class="control-button leave-button"
+                >
+                    Leave
+                </button>
+
+            </div>
+
+        </main>
+
+    </section>
+
+</div>
+
+
+<!-- =========================================================
+     REMOTE AUDIO (Hidden - for WebRTC audio)
+     ========================================================= -->
+
+<audio
+    id="remoteAudio"
+    autoplay
+    playsinline
+    style="display: none;"
+></audio>
+
+
+<!-- =========================================================
+     MEDIAPIPE
+     ========================================================= -->
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+
+<!-- =========================================================
+     APPLICATION JAVASCRIPT
+     ========================================================= -->
+
+<script src="app.js"></script>
+
+</body>
+
+</html>

@@ -216,3 +216,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+__pycache__/ 
+*.py[cod] 
+.venv/ 
+venv/ 
+backend/instance/ 
+backend/app_data 
+backend/models/*.joblib 
+.env 
+.DS_Store 
+backend/app_data.db 
+backend/app_data.db 

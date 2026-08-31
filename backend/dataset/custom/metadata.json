@@ -1,0 +1,32 @@
+{
+  "strategy": "user-level (3+ users)",
+  "users_detected": [
+    "user_001",
+    "user_002",
+    "user_003"
+  ],
+  "train_rows": 13682,
+  "validation_rows": 5214,
+  "test_rows": 7694,
+  "class_counts": {
+    "train": {
+      "draw": 5232,
+      "erase": 3121,
+      "no_gesture": 2973,
+      "clear": 2356
+    },
+    "validation": {
+      "draw": 1556,
+      "erase": 1542,
+      "no_gesture": 1416,
+      "clear": 700
+    },
+    "test": {
+      "draw": 2400,
+      "erase": 2081,
+      "no_gesture": 1831,
+      "clear": 1382
+    }
+  },
+  "frames_dropped_missing_values": 0
+}

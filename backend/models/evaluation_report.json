@@ -1,0 +1,58 @@
+{
+  "selected_k": 15,
+  "k_selection_validation_accuracy": {
+    "1": 0.7930571538166475,
+    "3": 0.8085922516302263,
+    "5": 0.8216340621403913,
+    "7": 0.8222094361334867,
+    "9": 0.828922132719601,
+    "11": 0.8300728807057921,
+    "13": 0.828922132719601,
+    "15": 0.830264672036824
+  },
+  "train_samples": 15817,
+  "validation_samples": 5214,
+  "test_samples": 7694,
+  "test_accuracy": 0.9364439823238887,
+  "test_precision_weighted": 0.939865292452481,
+  "test_recall_weighted": 0.9364439823238887,
+  "test_f1_weighted": 0.9361733670287475,
+  "confusion_matrix": [
+    [
+      1214,
+      156,
+      8,
+      4
+    ],
+    [
+      16,
+      2354,
+      2,
+      28
+    ],
+    [
+      3,
+      27,
+      2039,
+      12
+    ],
+    [
+      12,
+      135,
+      86,
+      1598
+    ]
+  ],
+  "confusion_matrix_label_order": [
+    "clear",
+    "draw",
+    "erase",
+    "no_gesture"
+  ],
+  "gesture_classes": [
+    "draw",
+    "erase",
+    "clear",
+    "no_gesture"
+  ]
+}

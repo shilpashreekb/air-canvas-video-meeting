@@ -1,0 +1,43 @@
+# Air Canvas for Video Meetings using Hand Gestures — Backend Requirements
+#
+# Tested target: Python 3.10 or 3.11 on Windows 10/11.
+# Python 3.12+ is NOT recommended: mediapipe wheels for 3.12 are inconsistent
+# across platforms at the time of writing. Use 3.10/3.11 in your virtual env.
+
+# --- Web framework / server ---
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+python-multipart==0.0.12
+
+# --- Data validation / settings ---
+pydantic==2.9.2
+pydantic-settings==2.5.2
+email-validator==2.2.0
+
+# --- Database ---
+SQLAlchemy==2.0.35
+
+# --- Authentication ---
+passlib[bcrypt]==1.7.4
+# passlib 1.7.4 is incompatible with bcrypt>=4.1 (raises a version-read error
+# on import). Pin bcrypt explicitly to a compatible 4.0.x release.
+bcrypt==4.0.1
+python-jose[cryptography]==3.3.0
+
+# --- Environment variables ---
+python-dotenv==1.0.1
+
+# --- WebSocket (also covered by uvicorn[standard], listed explicitly for clarity) ---
+websockets==13.1
+
+# --- Machine learning / computer vision ---
+mediapipe==0.10.14
+opencv-python==4.10.0.84
+numpy==1.26.4
+pandas==2.2.3
+scikit-learn==1.5.2
+joblib==1.4.2
+
+# --- Testing ---
+pytest==8.3.3
+httpx==0.27.2
