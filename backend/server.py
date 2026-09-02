@@ -457,13 +457,13 @@ async def websocket_endpoint(
             )
         )
 
-        if len(current_connections) >= 2:
+        if len(current_connections) >= 5:
 
             await websocket.accept()
 
             await websocket.send_json({
                 "type": "room_full",
-                "message": "Meeting already has two participants."
+                "message": "Meeting already has five participants."
             })
 
             await websocket.close()
