@@ -1,115 +1,651 @@
-"""
-Real-time-style gesture predictor.
+# backend/app/ml/predictor.py
 
-Role in the overall architecture (decided in Phase 1, Section 20): live,
-in-meeting gesture prediction runs CLIENT-SIDE in the browser (Phase 6's
-gestures.js), not through this backend module — MediaPipe already runs in
-JS, and round-tripping every frame's landmarks to the server would add
-latency for no benefit. This module exists for:
-    1. Offline evaluation (used internally by train_knn.py's test-set pass).
-    2. A reference/fallback implementation — e.g. if a future non-browser
-       client needs server-side prediction, or for debugging/comparing
-       against the JS implementation's output on the same input.
-
-This is a REAL KNN-backed predictor loaded from the joblib pipeline saved
-by train_knn.py — not a rule-based stand-in (Section 19: "Do not create a
-fake rule-based classifier and call it KNN").
-"""
-
-from collections import deque
-from pathlib import Path
-from typing import Deque, Dict, List, Optional
-
-import joblib
 import numpy as np
+from typing import List, Dict, Any, Optional
+from sklearn.pipeline import Pipeline
+from pathlib import Path
+import joblib
 
-from app.ml.feature_extraction import NUM_FEATURES, has_missing_landmarks
+from .feature_extraction import (
+    normalize_landmarks_single,
+    has_missing_landmarks,
+    NUM_FEATURES
+)
 
-DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "gesture_knn.joblib"
 
+# ============================================================
+# GESTURE CLASSES
+# ============================================================
+
+GESTURE_CLASSES = {
+    "draw": 0,
+    "erase": 1,
+    "clear": 2,
+    "no_gesture": 3
+}
+
+REVERSE_CLASSES = {
+    0: "draw",
+    1: "erase",
+    2: "clear",
+    3: "no_gesture"
+}
+
+
+# ============================================================
+# GESTURE PREDICTOR
+# ============================================================
 
 class GesturePredictor:
-    """
-    Wraps the trained sklearn Pipeline (normalize -> scale -> KNN) and adds
-    temporal smoothing/debouncing on top of raw per-frame predictions, so a
-    single noisy misclassified frame doesn't trigger an unwanted Air Canvas
-    command (Section 19, point 6; Section 21's debouncing requirement).
 
-    Smoothing strategy:
-        - Keep a rolling window of the last `window_size` raw predictions.
-        - The "confirmed" gesture only changes once a class holds at least
-          `min_agreement` votes within that window. This means a gesture
-          has to be seen consistently for several consecutive frames before
-          it's trusted, which is what prevents e.g. a single frame
-          misclassified as "clear" from wiping the canvas.
-    """
+    def __init__(self, model_path: Optional[str] = None):
 
-    def __init__(
-        self,
-        model_path: Path = DEFAULT_MODEL_PATH,
-        window_size: int = 5,
-        min_agreement: int = 3,
-    ):
-        if not model_path.exists():
-            raise FileNotFoundError(
-                f"No trained model found at {model_path}. Run scripts/train_knn.py "
-                "first — this predictor will not fabricate a model."
+        self.model: Optional[Pipeline] = None
+        self.model_path: Optional[Path] = None
+        self.is_loaded = False
+
+        if model_path:
+
+            self.model_path = Path(model_path)
+
+            self.load(
+                self.model_path
             )
-        self.pipeline = joblib.load(model_path)
-        self.window_size = window_size
-        self.min_agreement = min_agreement
-        self._history: Deque[str] = deque(maxlen=window_size)
-        self._confirmed_gesture: str = "no_gesture"
 
-    def reset(self) -> None:
-        """Clear prediction history — call this when a user leaves/rejoins a meeting."""
-        self._history.clear()
-        self._confirmed_gesture = "no_gesture"
 
-    def predict_raw(self, landmarks_flat: List[float]) -> Dict:
-        """
-        Run the model on a single frame's 42 landmark values, with no
-        temporal smoothing applied. Returns the raw per-frame prediction
-        and, if available, class probabilities.
-        """
-        if len(landmarks_flat) != NUM_FEATURES:
-            raise ValueError(f"Expected {NUM_FEATURES} landmark values, got {len(landmarks_flat)}.")
+    # ========================================================
+    # LOAD MODEL
+    # ========================================================
 
-        if has_missing_landmarks(landmarks_flat):
-            return {"gesture": "no_gesture", "confidence": None, "reason": "missing_landmarks"}
+    def load(
+        self,
+        model_path: Path
+    ) -> bool:
 
-        X = np.asarray(landmarks_flat, dtype=np.float64).reshape(1, -1)
-        gesture = self.pipeline.predict(X)[0]
+        try:
 
-        confidence: Optional[float] = None
-        if hasattr(self.pipeline, "predict_proba"):
-            proba = self.pipeline.predict_proba(X)[0]
-            classes = self.pipeline.classes_
-            confidence = float(proba[list(classes).index(gesture)])
+            if model_path.exists():
 
-        return {"gesture": gesture, "confidence": confidence, "reason": None}
+                self.model = joblib.load(
+                    model_path
+                )
 
-    def predict_smoothed(self, landmarks_flat: List[float]) -> Dict:
-        """
-        Run the model on a single frame and update the temporal smoothing
-        window, returning the *confirmed* (debounced) gesture rather than
-        the raw per-frame prediction.
+                self.is_loaded = True
 
-        This is the method the Air Canvas frontend logic conceptually
-        mirrors client-side (Phase 6) — kept here as the reference
-        implementation and for offline evaluation.
-        """
-        raw = self.predict_raw(landmarks_flat)
-        self._history.append(raw["gesture"])
+                print(
+                    f"✅ GesturePredictor loaded from {model_path}"
+                )
 
-        if len(self._history) == self._history.maxlen:
-            counts = {cls: self._history.count(cls) for cls in set(self._history)}
-            top_class = max(counts, key=counts.get)
-            if counts[top_class] >= self.min_agreement:
-                self._confirmed_gesture = top_class
+                # Show model classes if available
+                if hasattr(
+                    self.model,
+                    "classes_"
+                ):
+
+                    print(
+                        "🔵 Model classes:",
+                        self.model.classes_
+                    )
+
+                return True
+
+        except Exception as e:
+
+            print(
+                f"⚠️ Failed to load model: {e}"
+            )
+
+            self.model = None
+            self.is_loaded = False
+
+        return False
+
+
+    # ========================================================
+    # MAIN PREDICTION
+    # ========================================================
+
+    def predict(
+        self,
+        landmarks: List[float]
+    ) -> Dict[str, Any]:
+
+        # ----------------------------------------------------
+        # CHECK LANDMARK COUNT
+        # ----------------------------------------------------
+
+        if (
+            landmarks is None or
+            len(landmarks) < NUM_FEATURES
+        ):
+
+            print(
+                f"⚠️ Invalid landmarks: {len(landmarks) if landmarks else 0}"
+            )
+
+            return {
+
+                "raw_gesture":
+                    "no_gesture",
+
+                "confirmed_gesture":
+                    "no_gesture",
+
+                "confidence":
+                    0.0,
+
+                "probabilities":
+                    {}
+
+            }
+
+
+        # ----------------------------------------------------
+        # TAKE FIRST 42 VALUES
+        # ----------------------------------------------------
+
+        X = np.array(
+            landmarks[:NUM_FEATURES],
+            dtype=np.float32
+        ).reshape(
+            1,
+            -1
+        )
+
+
+        print(
+            f"📥 Received {len(landmarks)} landmarks"
+        )
+
+        print(
+            f"📥 First 10: {landmarks[:10]}"
+        )
+
+        print(
+            f"🔵 Prediction shape: {X.shape}"
+        )
+
+
+        # ====================================================
+        # USE TRAINED MODEL
+        # ====================================================
+
+        if (
+            self.is_loaded and
+            self.model is not None
+        ):
+
+            try:
+
+                print(
+                    "🔵 Using trained gesture model"
+                )
+
+
+                # ------------------------------------------------
+                # MODEL PREDICTION
+                # ------------------------------------------------
+
+                pred_label = self.model.predict(
+                    X
+                )[0]
+
+
+                print(
+                    f"🔵 Raw model label: {pred_label}"
+                )
+
+
+                # ------------------------------------------------
+                # PROBABILITIES
+                # ------------------------------------------------
+
+                probabilities = {}
+
+                if hasattr(
+                    self.model,
+                    "predict_proba"
+                ):
+
+                    probs = self.model.predict_proba(
+                        X
+                    )[0]
+
+                    confidence = float(
+                        np.max(probs)
+                    )
+
+                    print(
+                        f"🔵 Model probabilities: {probs}"
+                    )
+
+
+                    # Try to associate probabilities
+                    # with the model's actual class labels
+
+                    if hasattr(
+                        self.model,
+                        "classes_"
+                    ):
+
+                        classes = self.model.classes_
+
+                        for cls, prob in zip(
+                            classes,
+                            probs
+                        ):
+
+                            if isinstance(
+                                cls,
+                                str
+                            ):
+
+                                gesture_name = cls
+
+                            else:
+
+                                gesture_name = REVERSE_CLASSES.get(
+                                    int(cls),
+                                    "unknown"
+                                )
+
+                            probabilities[
+                                gesture_name
+                            ] = float(prob)
+
+                else:
+
+                    confidence = 1.0
+
+
+                # =================================================
+                # IMPORTANT:
+                # MODEL MAY RETURN STRING LABEL
+                # =================================================
+
+                if isinstance(
+                    pred_label,
+                    str
+                ):
+
+                    raw_gesture = (
+                        pred_label
+                        .strip()
+                        .lower()
+                    )
+
+                else:
+
+                    try:
+
+                        raw_gesture = REVERSE_CLASSES.get(
+                            int(pred_label),
+                            "no_gesture"
+                        )
+
+                    except (
+                        ValueError,
+                        TypeError
+                    ):
+
+                        raw_gesture = "no_gesture"
+
+
+                # ------------------------------------------------
+                # VALIDATE GESTURE
+                # ------------------------------------------------
+
+                valid_gestures = {
+
+                    "draw",
+                    "erase",
+                    "clear",
+                    "no_gesture"
+
+                }
+
+                if raw_gesture not in valid_gestures:
+
+                    print(
+                        f"⚠️ Unknown model gesture: {raw_gesture}"
+                    )
+
+                    raw_gesture = "no_gesture"
+
+
+                # ------------------------------------------------
+                # CONFIDENCE THRESHOLD
+                # ------------------------------------------------
+
+                if confidence >= 0.60:
+
+                    confirmed_gesture = raw_gesture
+
+                else:
+
+                    confirmed_gesture = "no_gesture"
+
+
+                print(
+                    f"🎯 MODEL RESULT: "
+                    f"{confirmed_gesture} "
+                    f"(confidence: {confidence:.3f})"
+                )
+
+
+                return {
+
+                    "raw_gesture":
+                        raw_gesture,
+
+                    "confirmed_gesture":
+                        confirmed_gesture,
+
+                    "confidence":
+                        confidence,
+
+                    "probabilities":
+                        probabilities
+
+                }
+
+
+            except Exception as e:
+
+                print(
+                    f"⚠️ Prediction error: {e}"
+                )
+
+                print(
+                    "🟡 Switching to fallback classifier..."
+                )
+
+
+        # ====================================================
+        # FALLBACK CLASSIFIER
+        # ====================================================
+
+        return self._fallback_predict(
+            landmarks
+        )
+
+
+    # ========================================================
+    # FALLBACK CLASSIFIER
+    # ========================================================
+
+    def _fallback_predict(
+        self,
+        landmarks: List[float]
+    ) -> Dict[str, Any]:
+
+        print(
+            "🟡 Using fallback gesture classifier"
+        )
+
+
+        # ----------------------------------------------------
+        # CHECK INPUT
+        # ----------------------------------------------------
+
+        if (
+            landmarks is None or
+            len(landmarks) < NUM_FEATURES
+        ):
+
+            return {
+
+                "raw_gesture":
+                    "no_gesture",
+
+                "confirmed_gesture":
+                    "no_gesture",
+
+                "confidence":
+                    0.0,
+
+                "probabilities":
+                    {}
+
+            }
+
+
+        # ----------------------------------------------------
+        # 42 VALUES → 21 LANDMARKS × 2
+        # ----------------------------------------------------
+
+        lm = np.array(
+            landmarks[:NUM_FEATURES],
+            dtype=np.float32
+        ).reshape(
+            21,
+            2
+        )
+
+
+        print(
+            "🔵 Converted landmarks to 21 × 2"
+        )
+
+
+        # ====================================================
+        # COUNT RAISED FINGERS
+        # ====================================================
+
+        fingers = 0
+
+
+        # ----------------------------------------------------
+        # INDEX
+        # ----------------------------------------------------
+
+        if lm[8][1] < lm[6][1]:
+
+            fingers += 1
+
+            print(
+                f"   ✅ INDEX RAISED: "
+                f"tip={lm[8][1]:.3f} "
+                f"< pip={lm[6][1]:.3f}"
+            )
+
+        else:
+
+            print(
+                f"   ❌ INDEX DOWN: "
+                f"tip={lm[8][1]:.3f} "
+                f">= pip={lm[6][1]:.3f}"
+            )
+
+
+        # ----------------------------------------------------
+        # MIDDLE
+        # ----------------------------------------------------
+
+        if lm[12][1] < lm[10][1]:
+
+            fingers += 1
+
+            print(
+                f"   ✅ MIDDLE RAISED: "
+                f"tip={lm[12][1]:.3f} "
+                f"< pip={lm[10][1]:.3f}"
+            )
+
+        else:
+
+            print(
+                f"   ❌ MIDDLE DOWN: "
+                f"tip={lm[12][1]:.3f} "
+                f">= pip={lm[10][1]:.3f}"
+            )
+
+
+        # ----------------------------------------------------
+        # RING
+        # ----------------------------------------------------
+
+        if lm[16][1] < lm[14][1]:
+
+            fingers += 1
+
+            print(
+                "   ✅ RING RAISED"
+            )
+
+        else:
+
+            print(
+                "   ❌ RING DOWN"
+            )
+
+
+        # ----------------------------------------------------
+        # PINKY
+        # ----------------------------------------------------
+
+        if lm[20][1] < lm[18][1]:
+
+            fingers += 1
+
+            print(
+                "   ✅ PINKY RAISED"
+            )
+
+        else:
+
+            print(
+                "   ❌ PINKY DOWN"
+            )
+
+
+        # ----------------------------------------------------
+        # THUMB
+        # ----------------------------------------------------
+
+        thumb_up = (
+            lm[4][0] > lm[3][0]
+        )
+
+        if thumb_up:
+
+            fingers += 1
+
+            print(
+                "   ✅ THUMB RAISED"
+            )
+
+        else:
+
+            print(
+                "   ❌ THUMB DOWN"
+            )
+
+
+        print(
+            f"🔍 TOTAL FINGERS RAISED: {fingers}"
+        )
+
+
+        # ====================================================
+        # CLASSIFICATION
+        # ====================================================
+
+        if fingers == 1:
+
+            gesture = "draw"
+
+            confidence = 0.85
+
+
+        elif fingers == 2:
+
+            gesture = "erase"
+
+            confidence = 0.85
+
+
+        elif fingers == 0:
+
+            # ------------------------------------------------
+            # FIST / CLEAR
+            # ------------------------------------------------
+
+            is_fist = (
+
+                lm[8][1] > lm[6][1]
+
+                and
+
+                lm[12][1] > lm[10][1]
+
+                and
+
+                lm[16][1] > lm[14][1]
+
+                and
+
+                lm[20][1] > lm[18][1]
+
+            )
+
+
+            if is_fist:
+
+                gesture = "clear"
+
+                confidence = 0.85
+
+            else:
+
+                gesture = "no_gesture"
+
+                confidence = 0.30
+
+
+        else:
+
+            gesture = "no_gesture"
+
+            confidence = 0.30
+
+
+        # ====================================================
+        # FINAL RESULT
+        # ====================================================
+
+        confirmed_gesture = (
+
+            gesture
+
+            if confidence >= 0.50
+
+            else
+
+            "no_gesture"
+
+        )
+
+
+        print(
+            f"🎯 FALLBACK RESULT: "
+            f"{confirmed_gesture} "
+            f"(fingers: {fingers})"
+        )
+
 
         return {
-            "raw_gesture": raw["gesture"],
-            "confidence": raw["confidence"],
-            "confirmed_gesture": self._confirmed_gesture,
+
+            "raw_gesture":
+                gesture,
+
+            "confirmed_gesture":
+                confirmed_gesture,
+
+            "confidence":
+                confidence,
+
+            "probabilities":
+                {}
+
         }

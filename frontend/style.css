@@ -1,815 +1,514 @@
+/* ============================================
+   RESET & BASE
+   ============================================ */
+
 * {
-    box-sizing: border-box;
     margin: 0;
     padding: 0;
+    box-sizing: border-box;
 }
-
 
 body {
-    font-family: Arial, sans-serif;
-    background: #111827;
-    color: white;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #0f0c29, #1a1a3e, #16213e);
+    color: #fff;
     min-height: 100vh;
+    overflow-x: hidden;
 }
-
-
-.app {
-    min-height: 100vh;
-}
-
-
-.screen {
-    min-height: 100vh;
-}
-
 
 .hidden {
     display: none !important;
 }
 
 
-/* ============================================================
+/* ============================================
    HOME SCREEN
-   ============================================================ */
+   ============================================ */
 
 #homeScreen {
     display: flex;
-    align-items: center;
     justify-content: center;
+    align-items: center;
+    min-height: 100vh;
     padding: 20px;
 }
 
-
 .home-card {
-    width: 420px;
-    max-width: 100%;
-
-    padding: 45px 40px;
-
-    background: #1f2937;
-
-    border: 1px solid #374151;
-
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 16px;
-
+    padding: 40px;
+    width: 100%;
+    max-width: 400px;
     text-align: center;
-
-    box-shadow:
-        0 20px 50px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
-
 
 .home-card h1 {
-    font-size: 42px;
-    margin-bottom: 12px;
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    background: linear-gradient(45deg, #00ff87, #60efff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
 }
-
 
 .subtitle {
-    color: #9ca3af;
-    line-height: 1.5;
-    margin-bottom: 35px;
+    color: #aaa;
+    margin-bottom: 30px;
+    font-size: 0.95rem;
 }
 
-
-/* ============================================================
-   INPUT
-   ============================================================ */
-
-#meetingIdInput {
+.home-card input {
     width: 100%;
-
-    padding: 13px 15px;
-
-    margin-bottom: 12px;
-
-    border: 1px solid #4b5563;
-
+    padding: 12px;
+    margin-bottom: 15px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.3);
     border-radius: 8px;
-
-    background: #111827;
-
-    color: white;
-
-    font-size: 15px;
-
+    color: #fff;
+    font-size: 1rem;
     outline: none;
 }
 
-
-#meetingIdInput:focus {
-    border-color: #2563eb;
+.home-card input:focus {
+    border-color: #00ff87;
 }
-
-
-#meetingIdInput::placeholder {
-    color: #6b7280;
-}
-
-
-/* ============================================================
-   BUTTONS
-   ============================================================ */
-
-button {
-    border: none;
-    border-radius: 8px;
-
-    padding: 12px 18px;
-
-    font-size: 14px;
-
-    cursor: pointer;
-
-    transition: 0.2s;
-}
-
 
 .primary-button {
     width: 100%;
-
-    background: #2563eb;
-    color: white;
-
-    font-size: 16px;
+    padding: 14px;
+    background: linear-gradient(45deg, #00ff87, #60efff);
+    border: none;
+    border-radius: 8px;
+    color: #1a1a3e;
+    font-weight: bold;
+    font-size: 1rem;
+    cursor: pointer;
+    margin-bottom: 10px;
+    transition: transform 0.2s, box-shadow 0.2s;
 }
-
 
 .primary-button:hover {
-    background: #1d4ed8;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0, 255, 135, 0.3);
 }
 
+.primary-button:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+    transform: none;
+}
 
 .secondary-button {
     width: 100%;
-
-    background: #374151;
-    color: white;
-
-    font-size: 16px;
+    padding: 14px;
+    background: transparent;
+    border: 2px solid #00ff87;
+    border-radius: 8px;
+    color: #00ff87;
+    font-weight: bold;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background 0.2s;
 }
-
 
 .secondary-button:hover {
-    background: #4b5563;
+    background: rgba(0, 255, 135, 0.1);
 }
 
+.camera-status {
+    margin: 10px 0;
+    color: #888;
+    font-size: 0.9rem;
+}
 
 .divider {
     display: flex;
-
     align-items: center;
-
-    gap: 15px;
-
-    margin: 25px 0;
-
-    color: #6b7280;
-
-    font-size: 12px;
+    margin: 20px 0;
+    color: #888;
 }
-
 
 .divider::before,
 .divider::after {
-    content: "";
-
+    content: '';
     flex: 1;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
 
-    height: 1px;
-
-    background: #374151;
+.divider span {
+    padding: 0 10px;
+    font-size: 0.9rem;
 }
 
 
-/* ============================================================
-   MEETING HEADER
-   ============================================================ */
+/* ============================================
+   MEETING SCREEN
+   ============================================ */
+
+#meetingScreen {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
 
 .header {
-    min-height: 70px;
-
-    padding: 12px 30px;
-
     display: flex;
-
-    align-items: center;
-
     justify-content: space-between;
-
-    background: #1f2937;
-
-    border-bottom: 1px solid #374151;
-}
-
-
-.header h1 {
-    font-size: 24px;
-}
-
-
-#meetingIdDisplay {
-    display: block;
-
-    margin-top: 4px;
-
-    font-size: 12px;
-
-    color: #9ca3af;
-}
-
-
-#connectionStatus {
-    font-size: 14px;
-
-    color: #9ca3af;
-}
-
-
-/* ============================================================
-   MEETING MAIN
-   ============================================================ */
-
-.meeting-main {
-    width: 100%;
-
-    max-width: 1400px;
-
-    margin: 0 auto;
-
-    padding: 20px;
-}
-
-
-/* ============================================================
-   PARTICIPANTS
-   ============================================================ */
-
-.participants-grid {
-    display: grid;
-
-    grid-template-columns:
-        repeat(2, minmax(0, 1fr));
-
-    gap: 18px;
-
-    width: 100%;
-}
-
-
-.participant-card {
-    position: relative;
-
-    background: #1f2937;
-
-    border: 1px solid #374151;
-
-    border-radius: 12px;
-
-    padding: 10px;
-
-    overflow: hidden;
-}
-
-
-.participant-label {
-    position: absolute;
-
-    top: 18px;
-    left: 18px;
-
-    z-index: 10;
-
-    padding: 6px 10px;
-
-    border-radius: 6px;
-
-    background: rgba(0, 0, 0, 0.65);
-
-    font-size: 13px;
-}
-
-
-/* ============================================================
-   LOCAL VIDEO
-   ============================================================ */
-
-.video-container {
-    position: relative;
-
-    width: 100%;
-
-    aspect-ratio: 16 / 9;
-
-    background: #000;
-
-    border-radius: 8px;
-
-    overflow: hidden;
-}
-
-
-#video {
-    position: absolute;
-
-    inset: 0;
-
-    width: 100%;
-    height: 100%;
-
-    object-fit: cover;
-
-    transform: scaleX(-1);
-
-    z-index: 1;
-}
-
-
-/* ============================================================
-   AIR CANVAS
-   ============================================================ */
-
-#airCanvas {
-    position: absolute;
-
-    inset: 0;
-
-    width: 100%;
-    height: 100%;
-
-    pointer-events: none;
-
-    z-index: 2;
-}
-
-
-/* ============================================================
-   LANDMARK CANVAS
-   ============================================================ */
-
-#landmarkCanvas {
-    position: absolute;
-
-    inset: 0;
-
-    width: 100%;
-    height: 100%;
-
-    pointer-events: none;
-
-    transform: scaleX(-1);
-
-    z-index: 3;
-}
-
-
-/* ============================================================
-   REMOTE VIDEO
-   ============================================================ */
-
-.remote-video-container {
-    position: relative;
-
-    width: 100%;
-
-    aspect-ratio: 16 / 9;
-
-    background: #0b1220;
-
-    border-radius: 8px;
-
-    overflow: hidden;
-}
-
-
-#remoteVideo {
-    width: 100%;
-    height: 100%;
-
-    object-fit: cover;
-
-    display: none;
-}
-
-
-.waiting-participant {
-    position: absolute;
-
-    inset: 0;
-
-    display: flex;
-
-    flex-direction: column;
-
     align-items: center;
-
-    justify-content: center;
-
-    gap: 12px;
-
-    color: #9ca3af;
+    padding: 15px 25px;
+    background: rgba(0, 0, 0, 0.3);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
-
-
-.participant-avatar {
-    width: 70px;
-    height: 70px;
-
-    display: flex;
-
-    align-items: center;
-    justify-content: center;
-
-    border-radius: 50%;
-
-    background: #374151;
-
-    font-size: 32px;
-}
-
-
-/* ============================================================
-   STATUS
-   ============================================================ */
-
-.status-panel {
-    display: flex;
-
-    gap: 40px;
-
-    margin: 18px 0;
-}
-
-
-.status-panel div {
-    display: flex;
-
-    flex-direction: column;
-
-    gap: 6px;
-}
-
-
-.status-panel span {
-    font-size: 12px;
-
-    color: #9ca3af;
-
-    text-transform: uppercase;
-}
-
-
-.status-panel strong {
-    font-size: 18px;
-}
-
-
-/* ============================================================
-   MEETING CONTROLS
-   ============================================================ */
-
-.meeting-controls {
-    display: flex;
-
-    align-items: center;
-
-    justify-content: center;
-
-    gap: 10px;
-
-    flex-wrap: wrap;
-
-    padding: 10px 0;
-}
-
-
-.control-button {
-    background: #374151;
-
-    color: white;
-}
-
-
-.control-button:hover {
-    background: #4b5563;
-}
-
-
-.primary-control {
-    background: #2563eb;
-}
-
-
-.primary-control:hover {
-    background: #1d4ed8;
-}
-
-
-.leave-button {
-    background: #dc2626;
-}
-
-
-.leave-button:hover {
-    background: #b91c1c;
-}
-
-
-button:disabled {
-    opacity: 0.6;
-
-    cursor: not-allowed;
-}
-
-
-/* ============================================================
-   RESPONSIVE
-   ============================================================ */
-
-@media (max-width: 800px) {
-
-    .participants-grid {
-        grid-template-columns: 1fr;
-    }
-
-
-    .header {
-        padding: 12px 15px;
-    }
-
-
-    .header h1 {
-        font-size: 20px;
-    }
-
-
-    .meeting-main {
-        padding: 10px;
-    }
-
-
-    .meeting-controls {
-        justify-content: stretch;
-    }
-
-
-    .meeting-controls button {
-        flex: 1;
-    }
-
-}
-/* ============================================================
-   MEETING ID
-   ============================================================ */
 
 .header-left {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    align-items: center;
+    gap: 20px;
 }
 
+.header h1 {
+    font-size: 1.5rem;
+    background: linear-gradient(45deg, #00ff87, #60efff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
 
 .meeting-id-display {
-    font-size: 13px;
-    color: #60a5fa;
-    font-weight: 600;
+    color: #aaa;
+    font-size: 0.9rem;
 }
 
+.connection-status {
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.meeting-main {
+    flex: 1;
+    padding: 20px;
+    max-width: 1400px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+
+/* ============================================
+   MEETING BANNER
+   ============================================ */
 
 .meeting-banner {
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 15px;
-
-    margin-bottom: 18px;
-    padding: 12px 18px;
-
-    background: #1f2937;
-
-    border: 1px solid #374151;
-
-    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 12px;
+    border-radius: 8px;
+    margin-bottom: 20px;
 }
-
 
 .meeting-banner span {
-    color: #9ca3af;
-    font-size: 13px;
+    color: #888;
 }
-
 
 .meeting-banner strong {
-    font-size: 20px;
+    font-size: 1.2rem;
     letter-spacing: 2px;
-    color: #60a5fa;
 }
-
 
 .copy-button {
-    padding: 7px 12px;
-
-    background: #374151;
-    color: white;
-
-    font-size: 12px;
+    background: rgba(255, 255, 255, 0.2);
+    border: none;
+    color: #fff;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: background 0.2s;
 }
-
 
 .copy-button:hover {
-    background: #4b5563;
-}
-/* =========================================================
-   AIR CANVAS - HOME SCREEN POLISH
-   ========================================================= */
-
-.home-card {
-    width: min(440px, 90vw);
-    padding: 42px 38px;
-    border-radius: 22px;
-}
-
-.home-card h1 {
-    margin-bottom: 12px;
-    font-size: 42px;
-    font-weight: 700;
-    letter-spacing: -1px;
-}
-
-.home-card .subtitle {
-    margin: 0 auto 30px;
-    max-width: 360px;
-    line-height: 1.6;
+    background: rgba(255, 255, 255, 0.3);
 }
 
 
-/* =========================================================
-   USER NAME INPUT
-   ========================================================= */
+/* ============================================
+   PARTICIPANTS
+   ============================================ */
 
-#userNameInput {
-    display: block;
-    width: 100%;
-    height: 52px;
-    box-sizing: border-box;
+.participants-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 20px;
+    margin-bottom: 20px;
+}
 
-    padding: 0 16px;
-
-    margin: 0 0 12px;
-
-    border: 1px solid #475569;
+.participant-card {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 12px;
-
-    background: #111827;
-    color: #ffffff;
-
-    font-size: 16px;
-    outline: none;
-
-    transition:
-        border-color 0.2s ease,
-        box-shadow 0.2s ease;
+    overflow: hidden;
+    position: relative;
 }
 
-#userNameInput::placeholder {
-    color: #94a3b8;
-}
-
-#userNameInput:focus {
-    border-color: #3b82f6;
-
-    box-shadow:
-        0 0 0 3px rgba(59, 130, 246, 0.18);
+.participant-label {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    z-index: 20;
 }
 
 
-/* =========================================================
-   HOME BUTTONS
-   ========================================================= */
+/* ============================================
+   LOCAL VIDEO
+   ============================================ */
 
-#homeStartCamera,
-#createMeetingButton,
-#joinMeetingButton {
+.video-container {
+    position: relative;
     width: 100%;
-    height: 52px;
-
-    border-radius: 12px;
-
-    font-size: 16px;
-    font-weight: 600;
-
-    cursor: pointer;
-
-    transition:
-        transform 0.15s ease,
-        opacity 0.15s ease,
-        background 0.2s ease;
+    aspect-ratio: 16 / 9;
+    background: #000;
+    overflow: hidden;
 }
 
-#homeStartCamera:hover,
-#createMeetingButton:hover,
-#joinMeetingButton:hover {
-    transform: translateY(-1px);
-}
+.video-container video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 
-#homeStartCamera:active,
-#createMeetingButton:active,
-#joinMeetingButton:active {
-    transform: translateY(0);
+    /* PHONE SELFIE CAMERA */
+    transform: scaleX(-1);
 }
 
 
-/* =========================================================
-   CAMERA STATUS
-   ========================================================= */
+/* Local canvases */
 
-#cameraStatus {
-    margin: 8px 0 16px;
+.video-container canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
 
-    font-size: 13px;
+    /* Keep skeleton + drawing aligned with selfie camera */
+    transform: scaleX(-1);
+}
 
-    color: #94a3b8;
 
+/* ============================================
+   LOCAL CANVAS LAYERS
+   ============================================ */
+
+#airCanvas {
+    z-index: 5;
+    background: transparent;
+}
+
+#landmarkCanvas {
+    z-index: 10;
+    background: transparent;
+}
+
+
+/* ============================================
+   REMOTE VIDEO
+   ============================================ */
+
+.remote-video-container {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+}
+
+.remote-video-container video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+
+    /* IMPORTANT:
+       Remote video is NOT mirrored */
+    transform: none;
+
+    display: none;
+}
+
+
+/* ============================================
+   REMOTE DRAWING CANVAS
+   ============================================ */
+
+#remoteCanvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+
+    width: 100%;
+    height: 100%;
+
+    pointer-events: none;
+
+    z-index: 5;
+
+    background: transparent;
+
+    /* IMPORTANT:
+       Remote drawing is NOT mirrored */
+    transform: none;
+}
+
+
+/* ============================================
+   WAITING
+   ============================================ */
+
+.waiting-participant {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #888;
+    height: 100%;
+}
+
+.waiting-participant.hidden {
+    display: none;
+}
+
+.participant-avatar {
+    font-size: 4rem;
+    margin-bottom: 15px;
+}
+
+
+/* ============================================
+   STATUS PANEL
+   ============================================ */
+
+.status-panel {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    margin-bottom: 20px;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 15px;
+    border-radius: 8px;
+}
+
+.status-panel div {
     text-align: center;
 }
 
-
-/* =========================================================
-   CREATE MEETING
-   ========================================================= */
-
-#createMeetingButton {
-    margin-top: 0;
-}
-
-
-/* =========================================================
-   DIVIDER
-   ========================================================= */
-
-.home-card .divider {
-    margin: 28px 0;
-}
-
-
-/* =========================================================
-   MEETING ID INPUT
-   ========================================================= */
-
-#meetingIdInput {
+.status-panel span {
     display: block;
+    color: #888;
+    font-size: 0.85rem;
+    margin-bottom: 5px;
+}
 
-    width: 100%;
-    height: 52px;
+.status-panel strong {
+    font-size: 1.1rem;
+}
 
-    box-sizing: border-box;
 
-    padding: 0 16px;
+/* ============================================
+   CONTROLS
+   ============================================ */
 
-    margin-bottom: 14px;
-
-    border: 1px solid #475569;
+.meeting-controls {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 15px;
+    background: rgba(0, 0, 0, 0.4);
     border-radius: 12px;
-
-    background: #111827;
-    color: #ffffff;
-
-    font-size: 16px;
-
-    outline: none;
-
-    transition:
-        border-color 0.2s ease,
-        box-shadow 0.2s ease;
+    position: sticky;
+    bottom: 20px;
 }
 
-#meetingIdInput::placeholder {
-    color: #94a3b8;
+.control-button {
+    padding: 12px 20px;
+    border: none;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.2s;
 }
 
-#meetingIdInput:focus {
-    border-color: #3b82f6;
-
-    box-shadow:
-        0 0 0 3px rgba(59, 130, 246, 0.18);
+.control-button:hover {
+    background: rgba(255, 255, 255, 0.25);
+    transform: translateY(-2px);
 }
 
-
-/* =========================================================
-   JOIN BUTTON
-   ========================================================= */
-
-#joinMeetingButton {
-    margin-top: 0;
-}
-
-
-/* =========================================================
-   DISABLED STATE
-   ========================================================= */
-
-#homeStartCamera:disabled {
-    opacity: 0.65;
+.control-button:disabled {
+    opacity: 0.5;
     cursor: not-allowed;
     transform: none;
+}
+
+.primary-control {
+    background: linear-gradient(45deg, #00ff87, #60efff);
+    color: #1a1a3e;
+    font-weight: bold;
+}
+
+.leave-button {
+    background: #f44336;
+    color: #fff;
+}
+
+.leave-button:hover {
+    background: #d32f2f;
+}
+
+.muted {
+    background: #ff9800 !important;
+}
+
+.camera-off {
+    background: #f44336 !important;
+}
+
+
+/* ============================================
+   RESPONSIVE
+   ============================================ */
+
+@media (max-width: 768px) {
+
+    .participants-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .header {
+        flex-direction: column;
+        gap: 10px;
+        text-align: center;
+    }
+
+    .meeting-controls {
+        gap: 8px;
+    }
+
+    .control-button {
+        padding: 10px 15px;
+        font-size: 0.85rem;
+    }
 }

@@ -1,186 +1,155 @@
+# backend/app/websocket/routes.py
+
+import json
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from typing import Dict, Set, Optional
+import logging
 
+router = APIRouter()
+logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    prefix="/ws",
-    tags=["websocket"],
-)
-
-
-# ============================================================
-# MEETING ROOMS
-# ============================================================
-
-rooms = {}
-
-
-# ============================================================
-# WEBRTC SIGNALING
-# ============================================================
-
-@router.websocket("/meeting/{meeting_id}")
-async def meeting_websocket(
-    websocket: WebSocket,
-    meeting_id: str,
-):
-    """
-    WebRTC signaling channel.
-
-    The server does not carry the actual video.
-    It only passes WebRTC signaling messages between
-    the two participants in a meeting.
-    """
-
-    await websocket.accept()
-
-
-    # Create meeting room if necessary
-
-    if meeting_id not in rooms:
-        rooms[meeting_id] = []
-
-
-    room = rooms[meeting_id]
-
-
-    # --------------------------------------------------------
-    # MAXIMUM TWO PARTICIPANTS
-    # --------------------------------------------------------
-
-    if len(room) >= 2:
-
-        await websocket.send_json({
-            "type": "room_full",
-            "message": "This meeting already has two participants.",
-        })
-
-        await websocket.close()
-
-        return
-
-
-    # --------------------------------------------------------
-    # ADD PARTICIPANT
-    # --------------------------------------------------------
-
-    room.append(websocket)
-
-
-    print(
-        f"Participant joined meeting: {meeting_id}"
-    )
-
-    print(
-        f"Participants in room: {len(room)}"
-    )
-
-
-    # --------------------------------------------------------
-    # TELL PARTICIPANT THEIR ROLE
-    # --------------------------------------------------------
-
-    if len(room) == 1:
-
+# Store all active connections
+class ConnectionManager:
+    def __init__(self):
+        # room_id -> { user_id: websocket }
+        self.active_connections: Dict[str, Dict[str, WebSocket]] = {}
+        self.room_participants: Dict[str, Set[str]] = {}
+    
+    async def connect(self, websocket: WebSocket, room_id: str, user_id: str):
+        await websocket.accept()
+        
+        if room_id not in self.active_connections:
+            self.active_connections[room_id] = {}
+            self.room_participants[room_id] = set()
+        
+        self.active_connections[room_id][user_id] = websocket
+        self.room_participants[room_id].add(user_id)
+        
+        logger.info(f"User {user_id} joined room {room_id}")
+        
+        # Send current participant list to new user
+        participants = list(self.room_participants[room_id])
         await websocket.send_json({
             "type": "joined",
-            "role": "host",
-            "participants": 1,
+            "role": "host" if len(participants) == 1 else "guest",
+            "participants": participants,
+            "participant_count": len(participants),
+            "user_id": user_id
         })
-
-
-    else:
-
-        await websocket.send_json({
-            "type": "joined",
-            "role": "guest",
-            "participants": 2,
-        })
-
-
-        # Tell host that guest joined
-
-        try:
-
-            await room[0].send_json({
-                "type": "participant_joined",
-                "participants": 2,
+        
+        # Broadcast to others
+        await self.broadcast_to_room(room_id, {
+            "type": "participant_joined",
+            "user_id": user_id
+        }, exclude=user_id)
+        
+        await self.broadcast_participants(room_id)
+    
+    async def disconnect(self, room_id: str, user_id: str):
+        if room_id in self.active_connections:
+            self.active_connections[room_id].pop(user_id, None)
+            self.room_participants[room_id].discard(user_id)
+            
+            logger.info(f"User {user_id} left room {room_id}")
+            
+            if not self.active_connections[room_id]:
+                del self.active_connections[room_id]
+                del self.room_participants[room_id]
+            else:
+                await self.broadcast_to_room(room_id, {
+                    "type": "participant_left",
+                    "user_id": user_id
+                })
+                await self.broadcast_participants(room_id)
+    
+    async def broadcast_to_room(self, room_id: str, message: dict, exclude: Optional[str] = None):
+        if room_id not in self.active_connections:
+            return
+        
+        message_json = json.dumps(message)
+        for user_id, websocket in self.active_connections[room_id].items():
+            if user_id != exclude:
+                try:
+                    await websocket.send_text(message_json)
+                except Exception as e:
+                    logger.error(f"Broadcast error to {user_id}: {e}")
+    
+    async def send_to_user(self, room_id: str, target_user_id: str, message: dict):
+        if room_id in self.active_connections:
+            websocket = self.active_connections[room_id].get(target_user_id)
+            if websocket:
+                try:
+                    await websocket.send_json(message)
+                except Exception as e:
+                    logger.error(f"Send to {target_user_id} error: {e}")
+    
+    async def broadcast_participants(self, room_id: str):
+        if room_id in self.active_connections:
+            participants = list(self.room_participants.get(room_id, []))
+            await self.broadcast_to_room(room_id, {
+                "type": "participants",
+                "participants": participants
             })
 
-        except Exception:
-            pass
+manager = ConnectionManager()
 
+# ============================================================
+# WEBSOCKET ENDPOINT — MATCHES FRONTEND URL
+# ============================================================
 
-    # --------------------------------------------------------
-    # RECEIVE AND FORWARD SIGNALING
-    # --------------------------------------------------------
-
+@router.websocket("/ws/meeting/{room_id}/{user_id}")
+async def websocket_endpoint(
+    websocket: WebSocket,
+    room_id: str,
+    user_id: str
+):
+    await manager.connect(websocket, room_id, user_id)
+    
     try:
-
         while True:
-
-            message = await websocket.receive_json()
-
-
-            # Send message to the other participant
-
-            for connection in room:
-
-                if connection is not websocket:
-
-                    try:
-
-                        await connection.send_json(
-                            message
-                        )
-
-                    except Exception:
-                        pass
-
-
-    except WebSocketDisconnect:
-
-        print(
-            f"Participant left meeting: {meeting_id}"
-        )
-
-
-    finally:
-
-        # ----------------------------------------------------
-        # REMOVE PARTICIPANT
-        # ----------------------------------------------------
-
-        if websocket in room:
-
-            room.remove(websocket)
-
-
-        # ----------------------------------------------------
-        # INFORM REMAINING PARTICIPANT
-        # ----------------------------------------------------
-
-        for connection in room:
-
-            try:
-
-                await connection.send_json({
-                    "type": "participant_left",
-                    "participants": len(room),
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            message_type = message.get("type")
+            
+            if message_type == "offer":
+                target = message.get("target")
+                if target:
+                    await manager.send_to_user(room_id, target, {
+                        "type": "offer",
+                        "offer": message.get("offer"),
+                        "from": user_id
+                    })
+            
+            elif message_type == "answer":
+                target = message.get("target")
+                if target:
+                    await manager.send_to_user(room_id, target, {
+                        "type": "answer",
+                        "answer": message.get("answer"),
+                        "from": user_id
+                    })
+            
+            elif message_type == "ice_candidate":
+                target = message.get("target")
+                if target:
+                    await manager.send_to_user(room_id, target, {
+                        "type": "ice_candidate",
+                        "candidate": message.get("candidate"),
+                        "from": user_id
+                    })
+            
+            elif message_type == "canvas":
+                # Broadcast canvas to ALL participants
+                await manager.broadcast_to_room(room_id, {
+                    "type": "canvas",
+                    "action": message.get("action"),
+                    "from": user_id,
+                    "data": message.get("data", {})
                 })
-
-            except Exception:
-                pass
-
-
-        # ----------------------------------------------------
-        # DELETE EMPTY ROOM
-        # ----------------------------------------------------
-
-        if len(room) == 0:
-
-            del rooms[meeting_id]
-
-
-        print(
-            f"Participants remaining: {len(room)}"
-        )
+            
+            elif message_type == "leave":
+                await manager.disconnect(room_id, user_id)
+                break
+    
+    except WebSocketDisconnect:
+        await manager.disconnect(room_id, user_id)

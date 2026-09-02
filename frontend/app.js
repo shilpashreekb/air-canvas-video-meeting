@@ -1,30 +1,75 @@
 // ============================================================
 // AIR CANVAS MEETING - APP.JS
 // ============================================================
-
+// IMPORTANT:
+// - Uses trained backend KNN model
+// - DRAW / ERASE / CLEAR / NO_GESTURE come from backend
+// - No draw permission system
+// - Host and participant can both draw
+// - Remote drawing is synchronized through WebSocket
+// - Remote canvas is automatically created if missing
+// - Camera orientation is NOT modified here
 // ============================================================
-// BACKEND / WEBSOCKET
-
-// ============================================================
-// SERVER CONNECTION
-// ============================================================
-
-// CHANGE ONLY THIS LINE when Cloudflare gives a new URL.
-const SERVER_URL =
-    "https://yang-adopted-board-bureau.trycloudflare.com";
-
-// Everything else automatically uses SERVER_URL.
-const BACKEND_BASE =
-    SERVER_URL;
-
-const WS_BASE =
-    SERVER_URL
-        .replace(/^https:\/\//, "wss://")
-        .replace(/^http:\/\//, "ws://");
 
 
 // ============================================================
-// ELEMENTS
+// GLOBAL STATE
+// ============================================================
+
+let ws = null;
+
+let localStream = null;
+let remoteStream = null;
+
+let peerConnection = null;
+
+// ============================================================
+// LIVEKIT
+// ============================================================
+let liveKitRoom = null;
+let liveKitConnected = false;
+
+const LIVEKIT_TOKEN_SERVER_ID = "aircanvas-sixxay";
+
+let meetingId = null;
+let userName = "";
+
+let isMeetingCreator = false;
+let creatorName = "";
+
+let participants = [];
+
+let isCameraStarted = false;
+
+let hands = null;
+let camera = null;
+let mediaPipeStarted = false;
+
+let isDrawing = false;
+let lastX = 0;
+let lastY = 0;
+
+let lastDrawTime = 0;
+
+const DRAW_THROTTLE_MS = 30;
+
+let pendingIceCandidates = [];
+// ============================================================
+// DRAWING STABILITY STATE
+// ============================================================
+
+let activeGesture = "no_gesture";
+
+let backendRequestInFlight = false;
+let pendingLandmarks = null;
+
+let lastNetworkDrawTime = 0;
+
+const NETWORK_DRAW_INTERVAL = 30;
+
+
+// ============================================================
+// DOM ELEMENTS
 // ============================================================
 
 const homeScreen =
@@ -45,11 +90,11 @@ const cameraStatus =
 const createMeetingButton =
     document.getElementById("createMeetingButton");
 
-const joinMeetingButton =
-    document.getElementById("joinMeetingButton");
-
 const meetingIdInput =
     document.getElementById("meetingIdInput");
+
+const joinMeetingButton =
+    document.getElementById("joinMeetingButton");
 
 const meetingIdDisplay =
     document.getElementById("meetingIdDisplay");
@@ -60,14 +105,23 @@ const meetingIdLarge =
 const copyMeetingId =
     document.getElementById("copyMeetingId");
 
+const connectionStatus =
+    document.getElementById("connectionStatus");
+
+const localParticipantLabel =
+    document.getElementById("localParticipantLabel");
+
+const remoteParticipantLabel =
+    document.getElementById("remoteParticipantLabel");
+
+const waitingParticipant =
+    document.getElementById("waitingParticipant");
+
 const video =
     document.getElementById("video");
 
 const remoteVideo =
     document.getElementById("remoteVideo");
-
-const waitingParticipant =
-    document.getElementById("waitingParticipant");
 
 const airCanvas =
     document.getElementById("airCanvas");
@@ -75,25 +129,16 @@ const airCanvas =
 const landmarkCanvas =
     document.getElementById("landmarkCanvas");
 
-const airCtx =
-    airCanvas.getContext("2d");
-
-const landmarkCtx =
-    landmarkCanvas.getContext("2d");
-
-const gestureElement =
+const gestureDisplay =
     document.getElementById("gesture");
 
-const confidenceElement =
+const confidenceDisplay =
     document.getElementById("confidence");
 
-const connectionStatus =
-    document.getElementById("connectionStatus");
-
-const startCameraButton =
+const startCameraBtn =
     document.getElementById("startCamera");
 
-const clearCanvasButton =
+const clearCanvasBtn =
     document.getElementById("clearCanvas");
 
 const muteButton =
@@ -102,838 +147,1577 @@ const muteButton =
 const cameraButton =
     document.getElementById("cameraButton");
 
-const leaveMeetingButton =
+const leaveMeetingBtn =
     document.getElementById("leaveMeeting");
 
-const localParticipantLabel =
-    document.getElementById("localParticipantLabel");
-
-const remoteParticipantLabel =
-    document.getElementById("remoteParticipantLabel");
-
-const requestDrawPermissionButton =
-    document.getElementById("requestDrawPermission");
+const remoteAudio =
+    document.getElementById("remoteAudio");
 
 
 // ============================================================
-// STATE
+// REMOTE CANVAS
 // ============================================================
-let gestureHistory = [];
-
-let lastConfirmedGesture = "no_gesture";
-
-let stream = null;
-
-let hands = null;
-
-let mediaPipeReady = false;
-
-let processing = false;
-
-let processingFrame = false;
-
-let currentGesture = "no_gesture";
-
-let lastPredictionTime = 0;
-
-const PREDICTION_INTERVAL = 180;
-
-let predictionRunning = false;
-
-
-// ============================================================
-// DRAWING
+// Your HTML currently does NOT contain remoteCanvas.
+// Therefore we create it automatically.
 // ============================================================
 
-let lastDrawPoint = null;
-
-let smoothX = null;
-
-let smoothY = null;
-
-const SMOOTHING = 0.65;
+let remoteCanvas = null;
+let remoteCtx = null;
 
 
-// ============================================================
-// MEETING
-// ============================================================
+function createRemoteCanvas() {
 
-let currentMeetingId = null;
-
-let myName = "";
-
-let remoteName = "Participant";
-
-let isHost = false;
-
-// Drawing permission
-let participantDrawPermission = false;
-let permissionRequestPending = false;
-
-// ============================================================
-// AUDIO / VIDEO
-// ============================================================
-
-let isMuted = false;
-
-let isCameraOff = false;
-
-
-// ============================================================
-// WEBSOCKET
-// ============================================================
-
-let socket = null;
-
-
-// ============================================================
-// WEBRTC
-// ============================================================
-
-let peerConnection = null;
-
-let dataChannel = null;
-
-
-// ============================================================
-// WEBRTC CONFIG
-// ============================================================
-
-const rtcConfiguration = {
-
-    iceServers: [
-
-        {
-            urls:
-                "stun:stun.l.google.com:19302"
-        }
-
-    ]
-
-};
-// ============================================================
-// WEBRTC
-// ============================================================
-
-function createPeerConnection() {
-
-    if (peerConnection) {
-
-        return peerConnection;
+    if (remoteCanvas) {
+        return;
     }
 
+    const remoteContainer =
+        remoteVideo.parentElement;
 
-    peerConnection =
-        new RTCPeerConnection(
-            rtcConfiguration
+    if (!remoteContainer) {
+        console.error(
+            "❌ Remote video container not found."
+        );
+        return;
+    }
+
+    remoteCanvas =
+        document.createElement("canvas");
+
+    remoteCanvas.id = "remoteCanvas";
+
+    remoteCanvas.style.position = "absolute";
+    remoteCanvas.style.top = "0";
+    remoteCanvas.style.left = "0";
+    remoteCanvas.style.width = "100%";
+    remoteCanvas.style.height = "100%";
+    remoteCanvas.style.pointerEvents = "none";
+    remoteCanvas.style.zIndex = "5";
+
+    remoteContainer.appendChild(remoteCanvas);
+
+    remoteCtx =
+        remoteCanvas.getContext("2d");
+
+    console.log(
+        "✅ Remote drawing canvas created."
+    );
+}
+
+
+// ============================================================
+// CANVAS CONTEXTS
+// ============================================================
+
+const airCtx =
+    airCanvas.getContext("2d");
+
+const landmarkCtx =
+    landmarkCanvas.getContext("2d");
+
+
+// ============================================================
+// INITIALIZATION
+// ============================================================
+
+document.addEventListener(
+    "DOMContentLoaded",
+    () => {
+
+        createRemoteCanvas();
+
+        setupCanvasSizes();
+
+        window.addEventListener(
+            "resize",
+            setupCanvasSizes
         );
 
+        homeStartCamera.addEventListener(
+            "click",
+            startCameraFromHome
+        );
 
-    // ========================================================
-    // LOCAL AUDIO + VIDEO
-    // ========================================================
+        createMeetingButton.addEventListener(
+            "click",
+            createMeeting
+        );
 
-    if (stream) {
+        joinMeetingButton.addEventListener(
+            "click",
+            joinMeeting
+        );
 
-        console.log("Adding tracks to peer connection:");
-        stream
-            .getTracks()
-            .forEach(
-                track => {
-                    console.log("  -", track.kind, "enabled:", track.enabled);
-                    peerConnection.addTrack(
-                        track,
-                        stream
-                    );
+        startCameraBtn.addEventListener(
+            "click",
+            startCameraFromMeeting
+        );
 
-                }
-            );
-    } else {
-        console.warn("No stream available to add tracks!");
+        clearCanvasBtn.addEventListener(
+            "click",
+            clearCanvas
+        );
+
+        muteButton.addEventListener(
+            "click",
+            toggleMute
+        );
+
+        cameraButton.addEventListener(
+            "click",
+            toggleCamera
+        );
+
+        leaveMeetingBtn.addEventListener(
+            "click",
+            leaveMeeting
+        );
+
+        copyMeetingId.addEventListener(
+            "click",
+            copyMeetingIdToClipboard
+        );
+
+        console.log(
+            "✅ Air Canvas application initialized."
+        );
+    }
+);
+
+
+// ============================================================
+// CANVAS SIZE SETUP
+// ============================================================
+
+function setupCanvasSizes() {
+
+    // --------------------------------------------------------
+    // LOCAL CANVAS
+    // --------------------------------------------------------
+
+    const localContainer =
+        video.parentElement;
+
+    if (localContainer) {
+
+        const width =
+            localContainer.clientWidth;
+
+        const height =
+            localContainer.clientHeight;
+
+        if (width > 0 && height > 0) {
+
+            airCanvas.width = width;
+            airCanvas.height = height;
+
+            landmarkCanvas.width = width;
+            landmarkCanvas.height = height;
+        }
     }
 
 
-    // ========================================================
-    // REMOTE AUDIO + VIDEO
-    // ========================================================
+    // --------------------------------------------------------
+    // REMOTE CANVAS
+    // --------------------------------------------------------
 
-    peerConnection.ontrack =
-        function(event) {
+    if (!remoteCanvas) {
+        createRemoteCanvas();
+    }
+
+    if (remoteCanvas) {
+
+        const remoteContainer =
+            remoteVideo.parentElement;
+
+        if (remoteContainer) {
+
+            const width =
+                remoteContainer.clientWidth;
+
+            const height =
+                remoteContainer.clientHeight;
+
+            if (width > 0 && height > 0) {
+
+                remoteCanvas.width = width;
+                remoteCanvas.height = height;
+            }
+        }
+    }
+}
+
+
+// ============================================================
+// HOME CAMERA
+// ============================================================
+
+async function startCameraFromHome() {
+
+    userName =
+        userNameInput.value.trim() ||
+        "User";
+
+    localParticipantLabel.textContent =
+        userName;
+
+    try {
+
+        localStream =
+            await navigator.mediaDevices.getUserMedia({
+                video: true,
+                audio: true
+            });
+
+        video.srcObject =
+            localStream;
+
+        await video.play();
+
+        isCameraStarted = true;
+
+        cameraStatus.textContent =
+            "✅ Camera & Mic On";
+
+        cameraStatus.style.color =
+            "#4caf50";
+
+        homeStartCamera.textContent =
+            "✅ Camera Started";
+
+        homeStartCamera.disabled =
+            true;
+
+        startCameraBtn.textContent =
+            "✅ Camera On";
+
+        startCameraBtn.disabled =
+            true;
+
+        initMediaPipe();
+
+        setTimeout(
+            setupCanvasSizes,
+            500
+        );
+
+        console.log(
+            "🎥 Camera and microphone started."
+        );
+
+    } catch (error) {
+
+        console.error(
+            "❌ Camera/Microphone error:",
+            error
+        );
+
+        cameraStatus.textContent =
+            "❌ Camera/Microphone access denied";
+
+        cameraStatus.style.color =
+            "#f44336";
+    }
+}
+
+
+// ============================================================
+// CAMERA FROM MEETING
+// ============================================================
+
+async function startCameraFromMeeting() {
+
+    if (isCameraStarted) {
+        return;
+    }
+
+    try {
+
+        localStream =
+            await navigator.mediaDevices.getUserMedia({
+                video: true,
+                audio: true
+            });
+
+        video.srcObject =
+            localStream;
+
+        await video.play();
+
+        isCameraStarted = true;
+
+        startCameraBtn.textContent =
+            "✅ Camera On";
+
+        startCameraBtn.disabled =
+            true;
+
+        initMediaPipe();
+
+        setTimeout(
+            setupCanvasSizes,
+            500
+        );
+
+    } catch (error) {
+
+        console.error(
+            "❌ Camera error:",
+            error
+        );
+
+        alert(
+            "Could not access camera and microphone."
+        );
+    }
+}
+
+
+// ============================================================
+// CREATE MEETING
+// ============================================================
+
+async function createMeeting() {
+
+    userName =
+        userNameInput.value.trim() ||
+        "User";
+
+    if (!isCameraStarted) {
+
+        await startCameraFromHome();
+
+        if (!isCameraStarted) {
+            return;
+        }
+    }
+
+    meetingId =
+        generateMeetingId();
+
+    isMeetingCreator = true;
+
+    creatorName =
+        userName;
+
+    participants = [
+        {
+            id: "local",
+            name: userName,
+            isCreator: true
+        }
+    ];
+
+    setupMeetingUI();
+
+    connectWebSocket();
+}
+
+
+// ============================================================
+// JOIN MEETING
+// ============================================================
+
+async function joinMeeting() {
+
+    userName =
+        userNameInput.value.trim() ||
+        "User";
+
+    meetingId =
+        meetingIdInput.value
+            .trim()
+            .toUpperCase();
+
+    if (!meetingId) {
+
+        alert(
+            "Please enter the Meeting ID."
+        );
+
+        return;
+    }
+
+    if (!isCameraStarted) {
+
+        await startCameraFromHome();
+
+        if (!isCameraStarted) {
+            return;
+        }
+    }
+
+    isMeetingCreator = false;
+
+    creatorName = "";
+
+    participants = [
+        {
+            id: "local",
+            name: userName,
+            isCreator: false
+        }
+    ];
+
+    setupMeetingUI();
+
+    connectWebSocket();
+}
+
+
+// ============================================================
+// MEETING UI
+// ============================================================
+
+function setupMeetingUI() {
+
+    homeScreen.classList.add(
+        "hidden"
+    );
+
+    meetingScreen.classList.remove(
+        "hidden"
+    );
+
+    meetingIdDisplay.textContent =
+        `Meeting ID: ${meetingId}`;
+
+    meetingIdLarge.textContent =
+        meetingId;
+
+    localParticipantLabel.textContent =
+        userName;
+
+    remoteParticipantLabel.textContent =
+        "Waiting...";
+
+    waitingParticipant.classList.remove(
+        "hidden"
+    );
+
+    remoteVideo.style.display =
+        "none";
+
+    clearLocalCanvasOnly();
+
+    clearRemoteCanvas();
+
+    setTimeout(
+        setupCanvasSizes,
+        200
+    );
+}
+
+
+// ============================================================
+// CONNECTION STATUS
+// ============================================================
+
+function updateConnectionStatus(status) {
+
+    connectionStatus.textContent =
+        `Backend: ${status}`;
+
+    connectionStatus.className =
+        "connection-status";
+
+    if (status === "Connected") {
+
+        connectionStatus.style.color =
+            "#4caf50";
+
+    } else if (status === "Error") {
+
+        connectionStatus.style.color =
+            "#f44336";
+
+    } else {
+
+        connectionStatus.style.color =
+            "#ff9800";
+    }
+}
+
+
+// ============================================================
+// WEBSOCKET CONNECTION
+// ============================================================
+
+function connectWebSocket() {
+
+    const wsUrl =
+        `ws://localhost:8000/ws/${encodeURIComponent(meetingId)}`;
+
+    console.log(
+        "🔌 Connecting:",
+        wsUrl
+    );
+
+    ws =
+        new WebSocket(wsUrl);
+
+
+    // --------------------------------------------------------
+    // OPEN
+    // --------------------------------------------------------
+
+    ws.onopen = () => {
+
+        console.log(
+            "✅ WebSocket connected."
+        );
+
+        updateConnectionStatus(
+            "Connected"
+        );
+
+        ws.send(
+            JSON.stringify({
+                type:
+                    isMeetingCreator
+                        ? "create_meeting"
+                        : "join_meeting",
+
+                meeting_id:
+                    meetingId,
+
+                user_name:
+                    userName
+            })
+        );
+
+        setTimeout(() => {
+            connectLiveKit();
+        }, 300);
+    };
+
+
+    // --------------------------------------------------------
+    // MESSAGE
+    // --------------------------------------------------------
+
+    ws.onmessage = async event => {
+
+        try {
+
+            const data =
+                JSON.parse(event.data);
 
             console.log(
-                "Remote track received:",
-                event.track.kind
+                "📩 WebSocket:",
+                data.type,
+                data
             );
 
-            if (event.track.kind === "video") {
+
+            switch (data.type) {
+
+
+                // ============================================
+                // SELF INFO
+                // ============================================
+
+                case "self_info":
+
+                    isMeetingCreator =
+                        Boolean(
+                            data.is_creator
+                        );
+
+                    if (
+                        data.user_name
+                    ) {
+
+                        userName =
+                            data.user_name;
+
+                        localParticipantLabel.textContent =
+                            userName;
+                    }
+
+                    if (
+                        data.is_creator
+                    ) {
+
+                        creatorName =
+                            data.user_name;
+                    }
+
+                    updateParticipantUI();
+
+                    break;
+
+
+                // ============================================
+                // CREATOR INFO
+                // ============================================
+
+                case "creator_info":
+
+                    creatorName =
+                        data.creator_name ||
+                        "Host";
+
+                    addOrUpdateParticipant(
+                        data.creator_id,
+                        data.creator_name,
+                        true
+                    );
+
+                    updateParticipantUI();
+
+                    break;
+
+
+                // ============================================
+                // PARTICIPANT JOINED
+                // ============================================
+
+                case "participant_joined":
+
+                    await handleParticipantJoined(
+                        data
+                    );
+
+                    break;
+
+
+                // ============================================
+                // PARTICIPANT LEFT
+                // ============================================
+
+                case "participant_left":
+
+                    handleParticipantLeft(
+                        data
+                    );
+
+                    break;
+
+
+
+                // ============================================
+                // REMOTE DRAWING
+                // ============================================
+
+                case "draw_data":
+
+                    drawRemoteLine(
+                        data
+                    );
+
+                    break;
+
+
+                // ============================================
+                // REMOTE CLEAR
+                // ============================================
+
+                case "clear_canvas":
+
+                    clearRemoteCanvas();
+
+                    console.log(
+                        "🧹  Remote participant drawing cleared."
+                    );
+
+                    break;
+
+
+                // ============================================
+                // ROOM FULL
+                // ============================================
+
+                case "room_full":
+
+                    alert(
+                        "This meeting already has two participants."
+                    );
+
+                    break;
+
+
+                // ============================================
+                // ERROR
+                // ============================================
+
+                case "error":
+
+                    console.error(
+                        "❌ Server error:",
+                        data.message
+                    );
+
+                    alert(
+                        data.message ||
+                        "Server error."
+                    );
+
+                    break;
+
+
+                default:
+
+                    console.log(
+                        "ℹ️ Unknown message:",
+                        data.type
+                    );
+            }
+
+        } catch (error) {
+
+            console.error(
+                "❌ WebSocket message error:",
+                error
+            );
+        }
+
+    };
+
+
+    // --------------------------------------------------------
+    // ERROR
+    // --------------------------------------------------------
+
+    ws.onerror = error => {
+
+        console.error(
+            "❌ WebSocket error:",
+            error
+        );
+
+        updateConnectionStatus(
+            "Error"
+        );
+    };
+
+
+    // --------------------------------------------------------
+    // CLOSE
+    // --------------------------------------------------------
+
+    ws.onclose = () => {
+
+        console.log(
+            "🔌 WebSocket disconnected."
+        );
+
+        if (
+            !meetingScreen.classList.contains(
+                "hidden"
+            )
+        ) {
+
+            updateConnectionStatus(
+                "Disconnected"
+            );
+        }
+    };
+}
+
+
+// ============================================================
+// PARTICIPANT MANAGEMENT
+// ============================================================
+
+function addOrUpdateParticipant(
+    id,
+    name,
+    isCreator
+) {
+
+    if (!id) {
+        return;
+    }
+
+    const existing =
+        participants.find(
+            p => p.id === id
+        );
+
+    if (existing) {
+
+        existing.name =
+            name || existing.name;
+
+        existing.isCreator =
+            Boolean(isCreator);
+
+    } else {
+
+        participants.push({
+            id: id,
+            name: name || "User",
+            isCreator:
+                Boolean(isCreator)
+        });
+    }
+}
+
+
+async function handleParticipantJoined(
+    data
+) {
+
+    const participantId =
+        data.user_id;
+
+    const participantName =
+        data.user_name ||
+        "User";
+
+    if (!participantId) {
+        return;
+    }
+
+    // --------------------------------------------------------
+    // UPDATE EXISTING
+    // --------------------------------------------------------
+
+    addOrUpdateParticipant(
+        participantId,
+        participantName,
+        Boolean(data.is_creator)
+    );
+
+    updateParticipantUI();
+
+    console.log(
+        `👤 Participant: ${participantName}`
+    );
+
+
+    // --------------------------------------------------------
+    // HOST CREATES OFFER
+    // --------------------------------------------------------
+
+    if (
+        isMeetingCreator &&
+        !data.is_creator
+    ) {
+
+        await createHostOffer();
+    }
+}
+
+
+// ============================================================
+// UPDATE PARTICIPANT UI
+// ============================================================
+
+function updateParticipantUI() {
+
+    const remote =
+        participants.find(
+            p => p.id !== "local"
+        );
+
+    if (!remote) {
+
+        remoteParticipantLabel.textContent =
+            "Waiting...";
+
+        waitingParticipant.classList.remove(
+            "hidden"
+        );
+
+        return;
+    }
+
+    remoteParticipantLabel.textContent =
+        remote.name ||
+        "User";
+
+    waitingParticipant.classList.add(
+        "hidden"
+    );
+
+    console.log(
+        `👥 Remote participant: ${remote.name}`
+    );
+}
+
+
+// ============================================================
+// PARTICIPANT LEFT
+// ============================================================
+
+function handleParticipantLeft(
+    data
+) {
+
+    console.log(
+        "👋 Participant left:",
+        data.user_name
+    );
+
+    participants =
+        participants.filter(
+            p => p.id !== data.user_id
+        );
+
+    if (participants.length <= 1) {
+
+        remoteVideo.srcObject =
+            null;
+
+        remoteVideo.style.display =
+            "none";
+
+        remoteAudio.srcObject =
+            null;
+
+        waitingParticipant.classList.remove(
+            "hidden"
+        );
+
+        remoteParticipantLabel.textContent =
+            "Waiting...";
+
+        clearRemoteCanvas();
+
+        closePeerConnection();
+    }
+
+    updateParticipantUI();
+}
+
+// ============================================================
+// LIVEKIT VIDEO + AUDIO
+// ============================================================
+
+async function connectLiveKit() {
+
+    if (liveKitConnected) {
+        console.log("ℹ️ LiveKit already connected.");
+        return;
+    }
+
+    if (!window.LivekitClient) {
+        console.error("❌ LiveKit SDK not loaded.");
+        alert("LiveKit SDK is not loaded. Check index.html.");
+        return;
+    }
+
+    if (!meetingId) {
+        console.error("❌ Meeting ID missing.");
+        return;
+    }
+
+    if (!localStream) {
+        console.error("❌ Local camera/microphone not available.");
+        return;
+    }
+
+    try {
+
+        const LK = window.LivekitClient;
+
+        console.log("🔵 Connecting to LiveKit...");
+
+        const tokenSource =
+            LK.TokenSource.developmentTokenServer(
+                LIVEKIT_TOKEN_SERVER_ID
+            );
+
+        const credentials =
+            await tokenSource.fetch({
+                roomName: meetingId,
+                participantIdentity:
+                    "aircanvas-" +
+                    Math.random()
+                        .toString(36)
+                        .substring(2, 10),
+                participantName:
+                    userName 
+            });
+
+        liveKitRoom =
+            new LK.Room({
+                adaptiveStream: true,
+                dynacast: true
+            });
+
+
+        // ========================================================
+        // REMOTE TRACK SUBSCRIBED
+        // ========================================================
+
+        liveKitRoom.on(
+            LK.RoomEvent.TrackSubscribed,
+            (track, publication, participant) => {
+
+                console.log(
+                    "📥 LiveKit remote track:",
+                    track.kind,
+                    participant.name
+                );
+
+
+                const remoteName =
+                    participant.name || "User";
+
+
+                // ------------------------------------------------
+                // NAME
+                // ------------------------------------------------
+
+                remoteParticipantLabel.textContent =
+                    remoteName;
+
+
+                // ------------------------------------------------
+                // PARTICIPANT UI
+                // ------------------------------------------------
+
+                addOrUpdateParticipant(
+                    "livekit-" + participant.identity,
+                    remoteName,
+                    false
+                );
+
+                updateParticipantUI();
+
+
+                // ------------------------------------------------
+                // VIDEO
+                // ------------------------------------------------
+
                 if (
-                    event.streams &&
-                    event.streams[0]
+                    track.kind ===
+                    LK.Track.Kind.Video
                 ) {
 
-                    remoteVideo.srcObject =
-                        event.streams[0];
+                    track.attach(
+                        remoteVideo
+                    );
 
+                    remoteVideo.autoplay =
+                        true;
+
+                    remoteVideo.playsInline =
+                        true;
+
+                    remoteVideo.muted =
+                        false;
 
                     remoteVideo.style.display =
                         "block";
 
 
-                    if (
-                        waitingParticipant
-                    ) {
+                    if (waitingParticipant) {
 
-                        waitingParticipant.style.display =
-                            "none";
+                        waitingParticipant.classList.add(
+                            "hidden"
+                        );
                     }
-                }
-            } else if (event.track.kind === "audio") {
-                if (
-                    event.streams &&
-                    event.streams[0]
-                ) {
-                    // Try to get remote audio element
-                    const remoteAudio = document.getElementById("remoteAudio");
-                    if (remoteAudio) {
-                        remoteAudio.srcObject = event.streams[0];
-                        remoteAudio.play().catch(e => {
-                            console.log("Audio play error:", e);
+
+
+                    remoteVideo.play()
+                        .catch(error => {
+
+                            console.warn(
+                                "⚠️ Remote video autoplay:",
+                                error
+                            );
                         });
-                        console.log("Remote audio attached to audio element.");
-                    } else {
-                        // Fallback: attach to video element
-                        remoteVideo.srcObject = event.streams[0];
-                        console.log("Remote audio attached to video element (fallback).");
-                    }
+
+
+                    createRemoteCanvas();
+
+                    setTimeout(
+                        setupCanvasSizes,
+                        300
+                    );
+
+
+                    console.log(
+                        "✅ Remote video attached."
+                    );
+                }
+
+
+                // ------------------------------------------------
+                // AUDIO
+                // ------------------------------------------------
+
+                if (
+                    track.kind ===
+                    LK.Track.Kind.Audio
+                ) {
+
+                    track.attach(
+                        remoteAudio
+                    );
+
+                    remoteAudio.autoplay =
+                        true;
+
+                    remoteAudio.muted =
+                        false;
+
+                    remoteAudio.volume =
+                        1;
+
+
+                    remoteAudio.play()
+                        .catch(error => {
+
+                            console.warn(
+                                "⚠️ Remote audio autoplay:",
+                                error
+                            );
+                        });
+
+
+                    console.log(
+                        "🔊 Remote microphone attached."
+                    );
                 }
             }
-        };
+        );
 
 
-    // ========================================================
-    // ICE CANDIDATES
-    // ========================================================
+        // ========================================================
+        // REMOTE PARTICIPANT CONNECTED
+        // ========================================================
 
-    peerConnection.onicecandidate =
-        function(event) {
+        liveKitRoom.on(
+            LK.RoomEvent.ParticipantConnected,
+            participant => {
 
-            if (
-                event.candidate &&
-                socket &&
-                socket.readyState ===
-                    WebSocket.OPEN
-            ) {
-
-                socket.send(
-                    JSON.stringify({
-
-                        type:
-                            "ice_candidate",
-
-                        candidate:
-                            event.candidate
-
-                    })
+                console.log(
+                    "👤 LiveKit participant joined:",
+                    participant.name
                 );
-            }
-        };
 
 
-    // ========================================================
-    // REMOTE DATA CHANNEL
-    // ========================================================
+                const remoteName =
+                    participant.name || "User";
 
-    peerConnection.ondatachannel =
-        function(event) {
 
-            console.log(
-                "Remote data channel received."
-            );
+                remoteParticipantLabel.textContent =
+                    remoteName;
 
 
-            setupDataChannel(
-                event.channel
-            );
-        };
+                addOrUpdateParticipant(
+                    "livekit-" + participant.identity,
+                    remoteName,
+                    false
+                );
 
 
-    // ========================================================
-    // CONNECTION STATE
-    // ========================================================
+                updateParticipantUI();
 
-    peerConnection.onconnectionstatechange =
-        function() {
 
-            if (
-                !peerConnection
-            ) {
+                // Subscribe to tracks that were already published.
+                participant.trackPublications
+                    .forEach(publication => {
 
-                return;
-            }
+                        if (
+                            publication.isSubscribed &&
+                            publication.track
+                        ) {
 
-
-            const state =
-                peerConnection.connectionState;
-
-
-            console.log(
-                "WebRTC:",
-                state
-            );
-
-
-            if (
-                state ===
-                "connected"
-            ) {
-
-                connectionStatus.textContent =
-                    "Meeting: Connected";
-
-
-            } else if (
-                state ===
-                "connecting"
-            ) {
-
-                connectionStatus.textContent =
-                    "Meeting: Connecting...";
-
-
-            } else if (
-                state ===
-                "disconnected"
-            ) {
-
-                connectionStatus.textContent =
-                    "Meeting: Disconnected";
-
-
-            } else if (
-                state ===
-                "failed"
-            ) {
-
-                connectionStatus.textContent =
-                    "Meeting: Connection Failed";
-            }
-        };
-
-
-    return peerConnection;
-}
-
-
-// ============================================================
-// CANVAS
-// ============================================================
-
-function setupCanvasSize() {
-
-    if (
-        !video.videoWidth ||
-        !video.videoHeight
-    ) {
-        return;
-    }
-
-    airCanvas.width =
-        video.videoWidth;
-
-    airCanvas.height =
-        video.videoHeight;
-
-    landmarkCanvas.width =
-        video.videoWidth;
-
-    landmarkCanvas.height =
-        video.videoHeight;
-
-    resetCanvasContext();
-}
-
-
-function resetCanvasContext() {
-
-    airCtx.globalCompositeOperation =
-        "source-over";
-
-    airCtx.strokeStyle =
-        "#2563eb";
-
-    airCtx.lineWidth =
-        5;
-
-    airCtx.lineCap =
-        "round";
-
-    airCtx.lineJoin =
-        "round";
-}
-
-
-// ============================================================
-// STOP DRAWING
-// ============================================================
-
-function stopDrawing() {
-
-    lastDrawPoint =
-        null;
-
-    smoothX =
-        null;
-
-    smoothY =
-        null;
-}
-
-
-// ============================================================
-// USERNAME
-// ============================================================
-
-function getNameFromUI() {
-
-    const name =
-        userNameInput.value
-            .trim()
-            .slice(0, 30);
-
-    if (!name) {
-
-        userNameInput.focus();
-
-        alert(
-            "Please enter your name first."
-        );
-
-        return null;
-    }
-
-    localStorage.setItem(
-        "airCanvasUserName",
-        name
-    );
-
-    return name;
-}
-
-
-// Load previously used name
-
-const savedName =
-    localStorage.getItem(
-        "airCanvasUserName"
-    );
-
-if (savedName) {
-
-    userNameInput.value =
-        savedName;
-
-}
-
-
-// ============================================================
-// PARTICIPANT NAMES
-// ============================================================
-
-function updateParticipantNames() {
-
-    if (localParticipantLabel) {
-
-        localParticipantLabel.textContent =
-            myName
-                ? `${myName} (${isHost ? "Host" : "Participant"})`
-                : "You";
-    }
-
-    if (remoteParticipantLabel) {
-
-        remoteParticipantLabel.textContent =
-            remoteName
-                ? `${remoteName} (${isHost ? "Participant" : "Host"})`
-                : "Participant";
-    }
-}
-
-
-// ============================================================
-// CAMERA STATUS
-// ============================================================
-
-function updateCameraStatus() {
-
-    if (!stream) {
-
-        cameraStatus.textContent =
-            "Camera is off";
-
-        return;
-    }
-
-    const videoTracks =
-        stream.getVideoTracks();
-
-    const audioTracks =
-        stream.getAudioTracks();
-
-    const cameraOn =
-        videoTracks.some(
-            track => track.enabled
-        );
-
-    const micOn =
-        audioTracks.some(
-            track => track.enabled
-        );
-
-    if (cameraOn && micOn) {
-
-        cameraStatus.textContent =
-            "Camera and microphone are on";
-
-    } else if (cameraOn) {
-
-        cameraStatus.textContent =
-            "Camera is on • Microphone is muted";
-
-    } else {
-
-        cameraStatus.textContent =
-            "Camera is off";
-    }
-}
-
-
-// ============================================================
-// START CAMERA
-// ============================================================
-
-async function startCamera() {
-
-    if (stream) {
-
-        updateCameraStatus();
-
-        return true;
-    }
-
-    try {
-
-        if (
-            !navigator.mediaDevices ||
-            !navigator.mediaDevices.getUserMedia
-        ) {
-
-            alert(
-                "Camera and microphone are not supported in this browser."
-            );
-
-            return false;
-        }
-
-        if (homeStartCamera) {
-
-            homeStartCamera.disabled =
-                true;
-        }
-
-        if (startCameraButton) {
-
-            startCameraButton.disabled =
-                true;
-        }
-
-        cameraStatus.textContent =
-            "Starting camera...";
-
-        stream =
-            await navigator.mediaDevices
-                .getUserMedia({
-
-                    video: {
-
-                        width: {
-                            ideal: 1280
-                        },
-
-                        height: {
-                            ideal: 720
+                            console.log(
+                                "ℹ️ Existing track already subscribed."
+                            );
                         }
+                    });
+            }
+        );
 
-                    },
 
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true
-                    }
+        // ========================================================
+        // REMOTE PARTICIPANT DISCONNECTED
+        // ========================================================
 
-                });
+        liveKitRoom.on(
+            LK.RoomEvent.ParticipantDisconnected,
+            participant => {
 
-        console.log("Stream tracks:", stream.getTracks().map(t => t.kind));
+                console.log(
+                    "👋 LiveKit participant left:",
+                    participant.name
+                );
 
-        video.srcObject =
-            stream;
 
-        await video.play();
+                remoteVideo.srcObject =
+                    null;
 
-        setupCanvasSize();
+                remoteAudio.srcObject =
+                    null;
 
-        setupMediaPipe();
 
-        processing =
+                remoteVideo.style.display =
+                    "none";
+
+
+                if (waitingParticipant) {
+
+                    waitingParticipant.classList.remove(
+                        "hidden"
+                    );
+                }
+
+
+                remoteParticipantLabel.textContent =
+                    "Waiting...";
+
+
+                participants =
+                    participants.filter(
+                        p =>
+                            p.id !==
+                            "livekit-" +
+                            participant.identity
+                    );
+
+
+                clearRemoteCanvas();
+
+                updateParticipantUI();
+            }
+        );
+
+
+        // ========================================================
+        // CONNECT
+        // ========================================================
+
+        await liveKitRoom.connect(
+            credentials.serverUrl,
+            credentials.participantToken
+        );
+
+
+        liveKitConnected =
             true;
 
-        processingFrame =
-            false;
-
-        processVideo();
-
-        if (homeStartCamera) {
-
-            homeStartCamera.textContent =
-                "✓ Camera Started";
-
-            homeStartCamera.disabled =
-                false;
-        }
-
-        if (startCameraButton) {
-
-            startCameraButton.textContent =
-                "Camera Running";
-
-            startCameraButton.disabled =
-                false;
-        }
-
-        updateCameraStatus();
 
         console.log(
-            "Camera and microphone started."
+            "✅✅ LIVEKIT CONNECTED"
         );
 
-        return true;
+
+        // ========================================================
+        // PUBLISH CAMERA
+        // ========================================================
+
+        const cameraTrack =
+            localStream.getVideoTracks()[0];
+
+
+        if (cameraTrack) {
+
+            await liveKitRoom.localParticipant
+                .publishTrack(
+                    cameraTrack,
+                    {
+                        name:
+                            "air-canvas-camera",
+
+                        source:
+                            LK.Track.Source.Camera
+                    }
+                );
+
+
+            console.log(
+                "📤 Camera published to LiveKit."
+            );
+        }
+
+
+        // ========================================================
+        // PUBLISH MICROPHONE
+        // ========================================================
+
+        const microphoneTrack =
+            localStream.getAudioTracks()[0];
+
+
+        if (microphoneTrack) {
+
+            await liveKitRoom.localParticipant
+                .publishTrack(
+                    microphoneTrack,
+                    {
+                        name:
+                            "air-canvas-microphone",
+
+                        source:
+                            LK.Track.Source.Microphone
+                    }
+                );
+
+
+            console.log(
+                "📤 Microphone published to LiveKit."
+            );
+        }
+
+
+        // ========================================================
+        // EXISTING REMOTE PARTICIPANTS
+        // ========================================================
+
+        liveKitRoom.remoteParticipants
+            .forEach(participant => {
+
+                const remoteName =
+                    participant.name || "User";
+
+
+                remoteParticipantLabel.textContent =
+                    remoteName;
+
+
+                addOrUpdateParticipant(
+                    "livekit-" +
+                    participant.identity,
+
+                    remoteName,
+
+                    false
+                );
+            });
+
+
+        updateParticipantUI();
+
 
     } catch (error) {
 
         console.error(
-            "Camera error:",
+            "❌ LiveKit connection failed:",
             error
         );
 
-        stream = null;
-
-        processing =
-            false;
-
-        if (homeStartCamera) {
-
-            homeStartCamera.disabled =
-                false;
-
-            homeStartCamera.textContent =
-                "🎥 Start Camera";
-        }
-
-        if (startCameraButton) {
-
-            startCameraButton.disabled =
-                false;
-
-            startCameraButton.textContent =
-                "Start Camera";
-        }
-
-        cameraStatus.textContent =
-            "Camera is off";
+        liveKitRoom = null;
+        liveKitConnected = false;
 
         alert(
-            "Could not access camera/microphone.\n\nPlease allow camera and microphone permission."
+            "Could not connect video/audio through LiveKit. Check the browser console."
         );
-
-        return false;
     }
 }
 
 
 // ============================================================
-// STOP CAMERA
+// DISCONNECT LIVEKIT
 // ============================================================
 
-function stopCamera() {
+function disconnectLiveKit() {
 
-    processing =
-        false;
+    if (liveKitRoom) {
 
-    if (stream) {
+        try {
 
-        stream
-            .getTracks()
-            .forEach(
-                track => track.stop()
+            liveKitRoom.disconnect();
+
+        } catch (error) {
+
+            console.error(
+                "❌ LiveKit disconnect error:",
+                error
             );
+        }
     }
 
-    stream = null;
 
-    video.srcObject =
+    liveKitRoom =
         null;
 
-    stopDrawing();
+    liveKitConnected =
+        false;
 
-    if (homeStartCamera) {
 
-        homeStartCamera.disabled =
-            false;
+    if (remoteVideo) {
 
-        homeStartCamera.textContent =
-            "🎥 Start Camera";
+        remoteVideo.srcObject =
+            null;
+
+        remoteVideo.style.display =
+            "none";
     }
 
-    if (startCameraButton) {
 
-        startCameraButton.disabled =
-            false;
+    if (remoteAudio) {
 
-        startCameraButton.textContent =
-            "Start Camera";
+        remoteAudio.srcObject =
+            null;
     }
-
-    updateCameraStatus();
 }
 
+// ============================================================
+// REMOTE CANVAS POSITION
+// ============================================================
+
+function createRemoteCanvas() {
+
+    if (remoteCanvas) {
+        return;
+    }
+
+
+    const remoteContainer =
+        remoteVideo.parentElement;
+
+
+    if (!remoteContainer) {
+
+        console.error(
+            "❌ Remote video container not found."
+        );
+
+        return;
+    }
+
+
+    remoteContainer.style.position =
+        "relative";
+
+
+    remoteCanvas =
+        document.createElement(
+            "canvas"
+        );
+
+
+    remoteCanvas.id =
+        "remoteCanvas";
+
+
+    remoteCanvas.style.position =
+        "absolute";
+
+    remoteCanvas.style.top =
+        "0";
+
+    remoteCanvas.style.left =
+        "0";
+
+    remoteCanvas.style.width =
+        "100%";
+
+    remoteCanvas.style.height =
+        "100%";
+
+    remoteCanvas.style.pointerEvents =
+        "none";
+
+    remoteCanvas.style.zIndex =
+        "10";
+
+
+    remoteContainer.appendChild(
+        remoteCanvas
+    );
+
+
+    remoteCtx =
+        remoteCanvas.getContext(
+            "2d"
+        );
+
+
+    console.log(
+        "✅ Remote drawing canvas created."
+    );
+}
 
 // ============================================================
 // MEDIAPIPE
 // ============================================================
 
-function setupMediaPipe() {
+function initMediaPipe() {
 
-    if (mediaPipeReady) {
+    if (mediaPipeStarted) {
         return;
     }
 
-    hands =
-        new Hands({
+    try {
 
-            locateFile:
-                function(file) {
+        hands =
+            new Hands({
 
-                    return (
-                        "https://cdn.jsdelivr.net/npm/" +
-                        "@mediapipe/hands/" +
-                        file
-                    );
-
-                }
-
-        });
-
-    hands.setOptions({
-
-        maxNumHands: 1,
-
-        modelComplexity: 1,
-
-        minDetectionConfidence: 0.5,
-
-        minTrackingConfidence: 0.5
-
-    });
-
-    hands.onResults(
-        handleHandResults
-    );
-
-    mediaPipeReady =
-        true;
-}
-
-
-// ============================================================
-// PROCESS VIDEO
-// ============================================================
-
-async function processVideo() {
-
-    if (!processing) {
-        return;
-    }
-
-    if (processingFrame) {
-
-        requestAnimationFrame(
-            processVideo
-        );
-
-        return;
-    }
-
-    if (
-        mediaPipeReady &&
-        hands &&
-        video.readyState >= 2
-    ) {
-
-        processingFrame =
-            true;
-
-        try {
-
-            await hands.send({
-
-                image: video
-
+                locateFile:
+                    file =>
+                        `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
             });
 
-        } catch (error) {
 
-            console.error(
-                "MediaPipe error:",
-                error
+        hands.setOptions({
+
+            maxNumHands: 1,
+
+            modelComplexity: 1,
+
+            minDetectionConfidence:
+                0.7,
+
+            minTrackingConfidence:
+                0.5
+        });
+
+
+        hands.onResults(
+            onResults
+        );
+
+
+        camera =
+            new Camera(
+                video,
+                {
+
+                    onFrame:
+                        async () => {
+
+                            await hands.send({
+                                image: video
+                            });
+                        },
+
+                    width: 1280,
+
+                    height: 720
+                }
             );
 
-        } finally {
 
-            processingFrame =
-                false;
-        }
+        camera.start();
+
+        mediaPipeStarted =
+            true;
+
+        console.log(
+            "🖐️ MediaPipe started."
+        );
+
+    } catch (error) {
+
+        console.error(
+            "❌ MediaPipe initialization failed:",
+            error
+        );
     }
-
-    requestAnimationFrame(
-        processVideo
-    );
 }
 
 
 // ============================================================
-// HAND RESULTS
+// MEDIAPIPE RESULTS
+// ============================================================
+// ============================================================
+// MEDIAPIPE RESULTS
 // ============================================================
 
-function handleHandResults(
-    results
-) {
+function onResults(results) {
 
-    // ========================================================
-    // CHECK LANDMARK CANVAS
-    // ========================================================
-
-    if (
-        !landmarkCanvas.width ||
-        !landmarkCanvas.height
-    ) {
-
-        return;
-    }
-
-
-    // ========================================================
-    // CLEAR PREVIOUS LANDMARKS
-    // ========================================================
+    // --------------------------------------------------------
+    // CLEAR LANDMARK OVERLAY
+    // --------------------------------------------------------
 
     landmarkCtx.clearRect(
         0,
@@ -943,128 +1727,75 @@ function handleHandResults(
     );
 
 
-    // ========================================================
-    // NO HAND DETECTED
-    // ========================================================
+    // --------------------------------------------------------
+    // NO HAND
+    // --------------------------------------------------------
 
     if (
         !results.multiHandLandmarks ||
         results.multiHandLandmarks.length === 0
     ) {
 
-        if (gestureElement) {
+        gestureDisplay.textContent =
+            "NO GESTURE";
 
-            gestureElement.textContent =
-                "NO GESTURE";
-        }
+        confidenceDisplay.textContent =
+            "--";
 
-
-        if (confidenceElement) {
-
-            confidenceElement.textContent =
-                "--";
-        }
-
-
-        currentGesture =
+        activeGesture =
             "no_gesture";
 
-
-        gestureHistory =
-            [];
-
-
-        lastConfirmedGesture =
-            "no_gesture";
-
-
-        stopDrawing();
-
+        resetDrawingState();
 
         return;
     }
 
 
-    // ========================================================
-    // GET FIRST HAND
-    // ========================================================
+    // --------------------------------------------------------
+    // GET HAND
+    // --------------------------------------------------------
 
     const landmarks =
         results.multiHandLandmarks[0];
 
 
-    // ========================================================
-    // DRAW HAND LANDMARKS
-    // ========================================================
+    // --------------------------------------------------------
+    // DRAW HAND SKELETON
+    // --------------------------------------------------------
 
-    if (
-        typeof drawConnectors ===
-        "function"
-    ) {
-
-        drawConnectors(
-
-            landmarkCtx,
-
-            landmarks,
-
-            HAND_CONNECTIONS,
-
-            {
-
-                color:
-                    "#00ff00",
-
-                lineWidth:
-                    2
-
-            }
-        );
-    }
+    drawConnectors(
+        landmarkCtx,
+        landmarks,
+        HAND_CONNECTIONS,
+        {
+            color: "#00FF00",
+            lineWidth: 2
+        }
+    );
 
 
-    if (
-        typeof drawLandmarks ===
-        "function"
-    ) {
-
-        drawLandmarks(
-
-            landmarkCtx,
-
-            landmarks,
-
-            {
-
-                color:
-                    "#ff0000",
-
-                lineWidth:
-                    1,
-
-                radius:
-                    3
-
-            }
-        );
-    }
+    drawLandmarks(
+        landmarkCtx,
+        landmarks,
+        {
+            color: "#FF0000",
+            lineWidth: 1,
+            radius: 3
+        }
+    );
 
 
-    // ========================================================
-    // CREATE 42 LANDMARK VALUES
-    // ========================================================
+    // --------------------------------------------------------
+    // LANDMARK VALUES
+    // --------------------------------------------------------
 
     const values = [];
-
 
     landmarks.forEach(
         point => {
 
             values.push(
-                point.x
-            );
-
-            values.push(
+                point.x,
                 point.y
             );
         }
@@ -1072,7 +1803,42 @@ function handleHandResults(
 
 
     // ========================================================
-    // PREDICTION
+    // IMPORTANT:
+    // DRAW USING THE LATEST CONFIRMED GESTURE
+    //
+    // DO NOT WAIT FOR PYTHON HERE.
+    // ========================================================
+
+    if (activeGesture === "draw") {
+
+        drawOnCanvas(
+            values
+        );
+
+    }
+
+    else if (activeGesture === "erase") {
+
+        eraseFromCanvas(
+            values
+        );
+
+    }
+
+    else if (
+        activeGesture === "no_gesture"
+    ) {
+
+        resetDrawingState();
+
+    }
+
+
+    // ========================================================
+    // SEND LANDMARKS TO BACKEND
+    //
+    // Backend is ONLY responsible for deciding gesture.
+    // Drawing itself happens continuously above.
     // ========================================================
 
     const now =
@@ -1080,128 +1846,190 @@ function handleHandResults(
 
 
     if (
-        now -
-        lastPredictionTime >=
-        PREDICTION_INTERVAL
+        now - lastDrawTime >
+        DRAW_THROTTLE_MS
     ) {
 
-        lastPredictionTime =
+        lastDrawTime =
             now;
 
+        pendingLandmarks =
+            values;
 
-        predictGesture(
-            values
-        );
+        requestGesturePrediction();
+    }
+}
+
+// ============================================================
+// INDEX FINGER STRAIGHT CHECK
+// ============================================================
+
+function isIndexFingerStraight(landmarks) {
+
+    // MediaPipe index finger landmarks:
+    //
+    // 5  = index MCP
+    // 6  = index PIP
+    // 7  = index DIP
+    // 8  = index TIP
+
+    const mcp = landmarks[5];
+    const pip = landmarks[6];
+    const dip = landmarks[7];
+    const tip = landmarks[8];
+
+    if (!mcp || !pip || !dip || !tip) {
+        return false;
     }
 
 
-    // ========================================================
-    // INDEX FINGER
-    // ========================================================
-
-    const indexTip =
-        landmarks[8];
-
-
-    if (!indexTip) {
-
-        stopDrawing();
-
-        return;
-    }
+    // Calculate the angle at PIP.
+    // A straight finger is close to 180 degrees.
+    const angle = calculateAngle(
+        mcp,
+        pip,
+        dip
+    );
 
 
-    // ========================================================
-    // DRAW
-    // ========================================================
-
-    if (
-        currentGesture ===
-        "draw"
-    ) {
-
-        drawOnCanvas(
-            indexTip
-        );
-
-        return;
-    }
-
-
-    // ========================================================
-    // ERASE
-    // ========================================================
-
-    if (
-        currentGesture ===
-        "erase"
-    ) {
-
-        eraseOnCanvas(
-            indexTip
+    // Also check that the fingertip is
+    // sufficiently far from the MCP.
+    const fingerLength =
+        Math.hypot(
+            tip.x - mcp.x,
+            tip.y - mcp.y
         );
 
-        return;
-    }
+
+    // Straightness threshold.
+    //
+    // 180° = perfectly straight.
+    // We allow some natural bending.
+    const MIN_INDEX_ANGLE = 155;
+
+    const MIN_FINGER_LENGTH = 0.10;
 
 
-    // ========================================================
-    // CLEAR / NO GESTURE
-    // ========================================================
-
-    stopDrawing();
+    return (
+        angle >= MIN_INDEX_ANGLE &&
+        fingerLength >= MIN_FINGER_LENGTH
+    );
 }
 
 
 // ============================================================
+// LANDMARK ANGLE
 // ============================================================
-// GESTURE PREDICTION
-// ============================================================
-async function predictGesture(values) {
 
-    // ========================================================
-    // PREVENT MULTIPLE REQUESTS
-    // ========================================================
+function calculateAngle(
+    a,
+    b,
+    c
+) {
 
-    if (predictionRunning) {
-        return;
-    }
+    const BAx =
+        a.x - b.x;
+
+    const BAy =
+        a.y - b.y;
+
+    const BCx =
+        c.x - b.x;
+
+    const BCy =
+        c.y - b.y;
 
 
-    // ========================================================
-    // VALIDATE LANDMARKS
-    // ========================================================
+    const dot =
+        BAx * BCx +
+        BAy * BCy;
 
-    if (
-        !values ||
-        values.length !== 42
-    ) {
 
-        console.error(
-            "Invalid hand landmarks:",
-            values
+    const magnitudeBA =
+        Math.hypot(
+            BAx,
+            BAy
         );
 
+    const magnitudeBC =
+        Math.hypot(
+            BCx,
+            BCy
+        );
+
+
+    if (
+        magnitudeBA === 0 ||
+        magnitudeBC === 0
+    ) {
+        return 0;
+    }
+
+
+    let cosine =
+        dot /
+        (magnitudeBA *
+         magnitudeBC);
+
+
+    // Protect against floating-point
+    // values slightly outside [-1, 1].
+    cosine =
+        Math.max(
+            -1,
+            Math.min(
+                1,
+                cosine
+            )
+        );
+
+
+    return (
+        Math.acos(cosine) *
+        180 /
+        Math.PI
+    );
+}
+// ============================================================
+// SEND LANDMARKS TO TRAINED MODEL
+// ============================================================
+// ============================================================
+// SEND LANDMARKS TO TRAINED MODEL
+// ============================================================
+
+async function requestGesturePrediction() {
+
+    // --------------------------------------------------------
+    // Don't create multiple simultaneous requests
+    // --------------------------------------------------------
+
+    if (
+        backendRequestInFlight ||
+        !pendingLandmarks
+    ) {
+
         return;
     }
 
 
-    predictionRunning =
+    backendRequestInFlight =
         true;
+
+
+    const values =
+        pendingLandmarks;
+
+    pendingLandmarks =
+        null;
 
 
     try {
 
-        // ====================================================
-        // SEND TO BACKEND
-        // ====================================================
-
         const response =
             await fetch(
-                `${BACKEND_BASE}/api/gesture/predict`,
+                "http://localhost:8000/predict",
                 {
-                    method:
-                        "POST",
+                    method: "POST",
 
                     headers: {
                         "Content-Type":
@@ -1220,7 +2048,7 @@ async function predictGesture(values) {
         if (!response.ok) {
 
             throw new Error(
-                `Gesture server returned ${response.status}`
+                `HTTP ${response.status}`
             );
         }
 
@@ -1229,763 +2057,441 @@ async function predictGesture(values) {
             await response.json();
 
 
-        console.log(
-            "GESTURE RESULT:",
-            result
-        );
-
-
-        // ====================================================
-        // USE CONFIRMED GESTURE FIRST
-        // ====================================================
-
-        let gesture =
-            result.confirmed_gesture ||
-            "no_gesture";
-
-
-        gesture =
-            String(gesture)
-                .trim()
-                .toLowerCase()
-                .replace(
-                    /[\s-]+/g,
-                    "_"
-                );
-
-
-        // ====================================================
-        // CONFIDENCE
-        // ====================================================
-
-        let confidence =
-            Number(
-                result.confidence
-            );
-
-
-        if (
-            Number.isNaN(
-                confidence
+        const gesture =
+            (
+                result.confirmed_gesture ||
+                "no_gesture"
             )
-        ) {
-
-            confidence =
-                0;
-        }
+                .toString()
+                .toLowerCase();
 
 
-        // Backend may return 0–1
-        // or 0–100
-
-        if (
-            confidence > 0 &&
-            confidence <= 1
-        ) {
-
-            confidence *=
-                100;
-        }
-
-
-        if (
-            confidenceElement
-        ) {
-
-            confidenceElement.textContent =
-                `${confidence.toFixed(1)}%`;
-        }
-
-
-        // ====================================================
-        // LOW CONFIDENCE = IGNORE
-        // ====================================================
-
-        if (
-            confidence < 70
-        ) {
-
-            return;
-        }
-
-
-        // ====================================================
-        // GESTURE HISTORY
-        // ====================================================
-
-        if (
-            !Array.isArray(
-                gestureHistory
-            )
-        ) {
-
-            gestureHistory =
-                [];
-        }
-
-
-        gestureHistory.push(
-            gesture
-        );
-
-
-        // Keep only last 5
-        // predictions
-
-        if (
-            gestureHistory.length > 5
-        ) {
-
-            gestureHistory.shift();
-        }
-
-
-        // ====================================================
-        // CHECK STABILITY
-        // ====================================================
-
-        const counts =
-            {};
-
-
-        for (
-            const item
-            of gestureHistory
-        ) {
-
-            counts[item] =
-                (
-                    counts[item] ||
-                    0
-                ) + 1;
-        }
-
-
-        let stableGesture =
-            "no_gesture";
-
-        let highestCount =
-            0;
-
-
-        for (
-            const item
-            of Object.keys(counts)
-        ) {
-
-            if (
-                counts[item] >
-                highestCount
-            ) {
-
-                highestCount =
-                    counts[item];
-
-                stableGesture =
-                    item;
-            }
-        }
-
-
-        // Need at least 3
-        // matching predictions
-
-        if (
-            highestCount < 3
-        ) {
-
-            return;
-        }
-
-
-        // ====================================================
-        // CLEAR OLD HISTORY WHEN GESTURE CHANGES
-        // ====================================================
-
-        if (
-            stableGesture !==
-            lastConfirmedGesture
-        ) {
-
-            gestureHistory =
-                [stableGesture];
-        }
-
-
-        // ====================================================
+        // ----------------------------------------------------
         // UPDATE CURRENT GESTURE
-        // ====================================================
+        // ----------------------------------------------------
 
-        currentGesture =
-            stableGesture;
+        activeGesture =
+            gesture;
 
 
-        // ====================================================
+        // ----------------------------------------------------
         // DISPLAY GESTURE
-        // ====================================================
+        // ----------------------------------------------------
+
+        gestureDisplay.textContent =
+            gesture === "no_gesture"
+                ? "NO GESTURE"
+                : gesture.toUpperCase();
+
+
+        // ----------------------------------------------------
+        // DISPLAY CONFIDENCE
+        // ----------------------------------------------------
 
         if (
-            gestureElement
+            result.confidence !==
+            undefined
         ) {
 
-            gestureElement.textContent =
-                stableGesture
-                    .replace(
-                        /_/g,
-                        " "
-                    )
-                    .toUpperCase();
+            confidenceDisplay.textContent =
+                `${Math.round(
+                    result.confidence * 100
+                )}%`;
+
         }
 
+        else {
 
-        // ====================================================
-        // CLEAR
-        // ====================================================
-
-        if (
-            stableGesture ===
-            "clear"
-        ) {
-
-            // Trigger clear only once
-
-            if (
-                lastConfirmedGesture !==
-                "clear"
-            ) {
-
-                clearAirCanvas(
-                    true
-                );
-
-                console.log(
-                    "CLEAR CONFIRMED"
-                );
-            }
-
-
-            stopDrawing();
-
-
-            lastConfirmedGesture =
-                "clear";
-
-
-            return;
-        }
-
-
-        // ====================================================
-        // DRAW
-        // ====================================================
-
-        if (
-            stableGesture ===
-            "draw"
-        ) {
-
-            lastConfirmedGesture =
-                "draw";
-
-            return;
-        }
-
-
-        // ====================================================
-        // ERASE
-        // ====================================================
-
-        if (
-            stableGesture ===
-            "erase"
-        ) {
-
-            lastConfirmedGesture =
-                "erase";
-
-            return;
-        }
-
-
-        // ====================================================
-        // NO GESTURE
-        // ====================================================
-
-        if (
-            stableGesture ===
-            "no_gesture"
-        ) {
-
-            stopDrawing();
-
-            lastConfirmedGesture =
-                "no_gesture";
-        }
-
-
-    } catch (error) {
-
-        console.error(
-            "GESTURE PREDICTION ERROR:",
-            error
-        );
-
-
-        if (
-            gestureElement
-        ) {
-
-            gestureElement.textContent =
-                "NO GESTURE";
-        }
-
-
-        if (
-            confidenceElement
-        ) {
-
-            confidenceElement.textContent =
+            confidenceDisplay.textContent =
                 "--";
         }
 
 
-        currentGesture =
+        // ====================================================
+        // GESTURE STATE CHANGES
+        // ====================================================
+
+        switch (gesture) {
+
+
+            // ------------------------------------------------
+            // DRAW
+            // ------------------------------------------------
+
+            case "draw":
+
+                // Don't draw here.
+                //
+                // onResults() is already drawing continuously.
+                //
+                // This response ONLY changes the state.
+
+                break;
+
+
+            // ------------------------------------------------
+            // ERASE
+            // ------------------------------------------------
+
+            case "erase":
+
+                // Erasing is handled continuously
+                // from onResults().
+
+                break;
+
+
+            // ------------------------------------------------
+            // CLEAR
+            // ------------------------------------------------
+
+            case "clear":
+
+                clearCanvas();
+
+                resetDrawingState();
+
+                console.log(
+                    "🧹 My drawing cleared."
+                );
+
+                break;
+
+
+            // ------------------------------------------------
+            // NO GESTURE
+            // ------------------------------------------------
+
+            case "no_gesture":
+
+            default:
+
+                resetDrawingState();
+
+                break;
+        }
+
+
+    }
+
+    catch (error) {
+
+        console.error(
+            "❌ Backend prediction error:",
+            error
+        );
+
+        activeGesture =
             "no_gesture";
 
+        resetDrawingState();
 
-        stopDrawing();
+    }
 
+    finally {
 
-    } finally {
-
-        predictionRunning =
+        backendRequestInFlight =
             false;
+
+
+        // ----------------------------------------------------
+        // If a newer frame arrived while Python was busy,
+        // immediately process the newest one.
+        // ----------------------------------------------------
+
+        if (pendingLandmarks) {
+
+            requestGesturePrediction();
+        }
     }
 }
+
+
 // ============================================================
-// FINGER POSITION
+// LOCAL DRAWING
+// ============================================================
+// ============================================================
+// LOCAL DRAWING - SMOOTH + CONTINUOUS
 // ============================================================
 
-function getFingerPosition(
-    landmark
+function drawOnCanvas(
+    values
 ) {
 
+    const rawX =
+        values[16];
+
+    const rawY =
+        values[17];
+
+
+    // --------------------------------------------------------
+    // CONVERT NORMALIZED COORDINATES
+    // --------------------------------------------------------
+
     const targetX =
-        (1 - landmark.x) *
+        rawX *
         airCanvas.width;
 
     const targetY =
-        landmark.y *
+        rawY *
         airCanvas.height;
 
+
+    // ========================================================
+    // SMOOTHING
+    // ========================================================
+
+    const SMOOTHING_FACTOR =
+        0.45;
+
+
     if (
-        smoothX === null
+        window.smoothDrawX === null ||
+        window.smoothDrawX === undefined
     ) {
 
-        smoothX =
+        window.smoothDrawX =
             targetX;
 
-        smoothY =
+        window.smoothDrawY =
             targetY;
 
-    } else {
+    }
 
-        smoothX +=
+    else {
+
+        window.smoothDrawX +=
             (
                 targetX -
-                smoothX
+                window.smoothDrawX
             ) *
-            SMOOTHING;
+            SMOOTHING_FACTOR;
 
-        smoothY +=
+
+        window.smoothDrawY +=
             (
                 targetY -
-                smoothY
+                window.smoothDrawY
             ) *
-            SMOOTHING;
+            SMOOTHING_FACTOR;
     }
 
-    return {
 
-        x:
-            smoothX,
+    const displayedX =
+        window.smoothDrawX;
 
-        y:
-            smoothY
-
-    };
-}
+    const displayedY =
+        window.smoothDrawY;
 
 
-// ============================================================
-// DRAW ON CANVAS
-// ============================================================
+    // ========================================================
+    // START NEW STROKE
+    // ========================================================
 
-function drawOnCanvas(landmark) {
+    if (!isDrawing) {
 
-    // --------------------------------------------------------
-    // PARTICIPANT MUST HAVE HOST PERMISSION
-    // --------------------------------------------------------
+        isDrawing =
+            true;
 
-    if (
-        !isHost &&
-        !participantDrawPermission
-    ) {
+        lastX =
+            displayedX;
 
-        stopDrawing();
+        lastY =
+            displayedY;
 
         return;
     }
 
 
-    // --------------------------------------------------------
-    // ONLY DRAW WHEN DRAW GESTURE IS ACTIVE
-    // --------------------------------------------------------
+    // ========================================================
+    // MOVEMENT
+    // ========================================================
 
-    if (
-        currentGesture !==
-        "draw"
-    ) {
+    const dx =
+        displayedX -
+        lastX;
 
-        stopDrawing();
+    const dy =
+        displayedY -
+        lastY;
 
-        return;
-    }
-
-
-    // --------------------------------------------------------
-    // GET FINGER POSITION
-    // --------------------------------------------------------
-
-    const position =
-        getFingerPosition(
-            landmark
-        );
-
-
-    const x =
-        position.x;
-
-    const y =
-        position.y;
-
-
-    // --------------------------------------------------------
-    // FIRST POINT
-    // --------------------------------------------------------
-
-    if (
-        lastDrawPoint === null
-    ) {
-
-        lastDrawPoint = {
-
-            x,
-            y
-
-        };
-
-        smoothX =
-            x;
-
-        smoothY =
-            y;
-
-        return;
-    }
-
-
-    const x1 =
-        lastDrawPoint.x;
-
-    const y1 =
-        lastDrawPoint.y;
-
-
-    // --------------------------------------------------------
-    // PREVENT HUGE JUMPS
-    // --------------------------------------------------------
 
     const distance =
         Math.hypot(
-            x - x1,
-            y - y1
+            dx,
+            dy
         );
 
 
-    if (
-        distance > 100
-    ) {
-
-        lastDrawPoint = {
-
-            x,
-            y
-
-        };
-
-        smoothX =
-            x;
-
-        smoothY =
-            y;
+    // Ignore only extremely tiny camera jitter.
+    if (distance < 0.5) {
 
         return;
     }
 
 
-    // --------------------------------------------------------
-    // SMOOTH MOVEMENT
-    // --------------------------------------------------------
+    // ========================================================
+    // PROTECT AGAINST SUDDEN LANDMARK JUMPS
+    // ========================================================
+
+    const MAX_JUMP =
+        Math.max(
+            airCanvas.width,
+            airCanvas.height
+        ) * 0.12;
+
 
     if (
-        smoothX === null
+        distance >
+        MAX_JUMP
     ) {
 
-        smoothX =
-            x;
+        lastX =
+            displayedX;
 
-        smoothY =
-            y;
+        lastY =
+            displayedY;
 
-    } else {
-
-        smoothX =
-            smoothX * SMOOTHING +
-            x * (1 - SMOOTHING);
-
-        smoothY =
-            smoothY * SMOOTHING +
-            y * (1 - SMOOTHING);
+        return;
     }
 
 
-    const finalX =
-        smoothX;
-
-    const finalY =
-        smoothY;
-
-
-    // --------------------------------------------------------
-    // DRAW ON LOCAL CANVAS
-    // --------------------------------------------------------
-
-    resetCanvasContext();
+    // ========================================================
+    // DRAW
+    // ========================================================
 
     airCtx.beginPath();
 
     airCtx.moveTo(
-        x1,
-        y1
+        lastX,
+        lastY
     );
 
     airCtx.lineTo(
-        finalX,
-        finalY
+        displayedX,
+        displayedY
     );
+
+
+    airCtx.strokeStyle =
+        "#00ff00";
+
+
+    airCtx.lineWidth =
+        3;
+
+
+    airCtx.lineCap =
+        "round";
+
+
+    airCtx.lineJoin =
+        "round";
+
 
     airCtx.stroke();
 
 
-    // --------------------------------------------------------
-    // SEND DRAW MESSAGE
-    // --------------------------------------------------------
+    // ========================================================
+    // SEND TO PARTICIPANT
+    // ========================================================
 
-    sendCanvasMessage({
+    const now =
+        Date.now();
 
-        type:
-            "canvas",
-
-        action:
-            "draw",
-
-        x1:
-            x1,
-
-        y1:
-            y1,
-
-        x2:
-            finalX,
-
-        y2:
-            finalY,
-
-        color:
-            "#2563eb",
-
-        size:
-            5
-
-    });
-
-
-    // --------------------------------------------------------
-    // UPDATE LAST POINT
-    // --------------------------------------------------------
-
-    lastDrawPoint = {
-
-        x:
-            finalX,
-
-        y:
-            finalY
-
-    };
-}
-
-// ============================================================
-// ERASE ON CANVAS
-// ============================================================
-
-function eraseOnCanvas(landmark) {
 
     if (
-        !isHost &&
-        !participantDrawPermission
+        ws &&
+        ws.readyState ===
+            WebSocket.OPEN &&
+        now - lastNetworkDrawTime >=
+            NETWORK_DRAW_INTERVAL
     ) {
 
-        stopDrawing();
-
-        return;
-    }
-
-    if (
-        currentGesture !==
-        "erase"
-    ) {
-
-        stopDrawing();
-
-        return;
-    }
-
-    if (
-        !landmark ||
-        !airCtx
-    ) {
-
-        return;
-    }
+        lastNetworkDrawTime =
+            now;
 
 
-    const position =
-        getFingerPosition(
-            landmark
+        ws.send(
+            JSON.stringify({
+
+                type:
+                    "draw_data",
+
+                action:
+                    "draw",
+
+                x:
+                    displayedX /
+                    airCanvas.width,
+
+                y:
+                    displayedY /
+                    airCanvas.height,
+
+                lastX:
+                    lastX /
+                    airCanvas.width,
+
+                lastY:
+                    lastY /
+                    airCanvas.height,
+
+                color:
+                    "#00ff00",
+
+                lineWidth:
+                    3
+            })
         );
+    }
 
+
+    // ========================================================
+    // UPDATE LAST POSITION
+    // ========================================================
+
+    lastX =
+        displayedX;
+
+    lastY =
+        displayedY;
+}
+// ============================================================
+// LOCAL ERASE
+// ============================================================
+
+function eraseFromCanvas(values) {
+
+    // --------------------------------------------------------
+    // INDEX FINGER TIP
+    // --------------------------------------------------------
+
+    const rawX =
+        values[16];
+
+    const rawY =
+        values[17];
+
+
+    // --------------------------------------------------------
+    // CONVERT TO CANVAS COORDINATES
+    // --------------------------------------------------------
 
     const x =
-        position.x;
+        rawX *
+        airCanvas.width;
 
     const y =
-        position.y;
-
-
-    const size =
-        25;
+        rawY *
+        airCanvas.height;
 
 
     // --------------------------------------------------------
     // ERASE LOCALLY
     // --------------------------------------------------------
 
-    airCtx.save();
-
-    airCtx.globalCompositeOperation =
-        "destination-out";
-
-    airCtx.beginPath();
-
-    airCtx.arc(
-        x,
-        y,
-        size,
-        0,
-        Math.PI * 2
-    );
-
-    airCtx.fill();
-
-    airCtx.restore();
-
-
-    resetCanvasContext();
-
-
-    // --------------------------------------------------------
-    // SEND ERASE TO OTHER USER
-    // --------------------------------------------------------
-
-    sendCanvasMessage({
-
-        type:
-            "canvas",
-
-        action:
-            "erase",
-
-        x:
-            x,
-
-        y:
-            y,
-
-        size:
-            size
-
-    });
-
-
-    // --------------------------------------------------------
-    // RESET POINT
-    // --------------------------------------------------------
-
-    lastDrawPoint =
-        null;
-
-    smoothX =
-        null;
-
-    smoothY =
-        null;
-}
-
-// ============================================================
-// ERASE REMOTE POINT
-// ============================================================
-
-function eraseRemotePoint(message) {
-
-    if (!airCtx) {
-        return;
-    }
-
-
-    const x =
-        Number(
-            message.x
-        );
-
-    const y =
-        Number(
-            message.y
-        );
-
-
-    if (
-        Number.isNaN(x) ||
-        Number.isNaN(y)
-    ) {
-
-        return;
-    }
-
-
-    airCtx.save();
-
     airCtx.globalCompositeOperation =
         "destination-out";
 
@@ -1995,202 +2501,151 @@ function eraseRemotePoint(message) {
     airCtx.arc(
         x,
         y,
-        Number(
-            message.size
-        ) || 25,
+        20,
         0,
-        Math.PI * 2
+        2 * Math.PI
     );
 
     airCtx.fill();
 
-    airCtx.restore();
 
-
-    resetCanvasContext();
-}
-
-// ============================================================
-// DRAW REMOTE LINE
-// ============================================================
-
-function drawRemoteLine(message) {
-
-    if (!airCtx) {
-        return;
-    }
-
-
-    const x1 =
-        Number(message.x1);
-
-    const y1 =
-        Number(message.y1);
-
-    const x2 =
-        Number(message.x2);
-
-    const y2 =
-        Number(message.y2);
-
-
-    if (
-        Number.isNaN(x1) ||
-        Number.isNaN(y1) ||
-        Number.isNaN(x2) ||
-        Number.isNaN(y2)
-    ) {
-
-        return;
-    }
-
-
-    airCtx.save();
+    // --------------------------------------------------------
+    // RESTORE NORMAL DRAWING
+    // --------------------------------------------------------
 
     airCtx.globalCompositeOperation =
         "source-over";
 
-    airCtx.strokeStyle =
-        message.color ||
-        "#2563eb";
 
-    airCtx.lineWidth =
-        message.size ||
-        5;
-
-    airCtx.lineCap =
-        "round";
-
-    airCtx.lineJoin =
-        "round";
-
-
-    airCtx.beginPath();
-
-    airCtx.moveTo(
-        x1,
-        y1
-    );
-
-    airCtx.lineTo(
-        x2,
-        y2
-    );
-
-    airCtx.stroke();
-
-    airCtx.restore();
-
-    resetCanvasContext();
-}
-
-
-// ============================================================
-// CANVAS SNAPSHOT
-// ============================================================
-
-function sendCanvasSnapshot() {
+    // --------------------------------------------------------
+    // SEND ERASE TO OTHER PARTICIPANT
+    // --------------------------------------------------------
 
     if (
-        !dataChannel ||
-        dataChannel.readyState !==
-            "open"
+        ws &&
+        ws.readyState === WebSocket.OPEN
     ) {
-        return;
-    }
 
-    try {
+        ws.send(
+            JSON.stringify({
 
-        sendCanvasMessage({
+                type:
+                    "draw_data",
 
-            type:
-                "canvas",
+                action:
+                    "erase",
 
-            action:
-                "snapshot",
+                x:
+                    rawX,
 
-            image:
-                airCanvas.toDataURL(
-                    "image/png"
-                )
-
-        });
-
-    } catch (error) {
-
-        console.error(
-            "Snapshot error:",
-            error
+                y:
+                    rawY
+            })
         );
     }
+
+
+    // --------------------------------------------------------
+    // RESET DRAWING STATE
+    // --------------------------------------------------------
+
+    isDrawing =
+        false;
+
+    lastX =
+        0;
+
+    lastY =
+        0;
 }
 
+// ============================================================
+// RESET DRAWING STATE
+// ============================================================
 
-function receiveCanvasSnapshot(
-    imageData
-) {
+function resetDrawingState() {
 
-    const image =
-        new Image();
+    isDrawing =
+        false;
 
-    image.onload =
-        function() {
+    lastX =
+        0;
 
-            airCtx.clearRect(
+    lastY =
+        0;
 
-                0,
+    window.smoothDrawX =
+        null;
 
-                0,
-
-                airCanvas.width,
-
-                airCanvas.height
-
-            );
-
-            airCtx.drawImage(
-
-                image,
-
-                0,
-
-                0,
-
-                airCanvas.width,
-
-                airCanvas.height
-
-            );
-
-            resetCanvasContext();
-
-        };
-
-    image.src =
-        imageData;
+    window.smoothDrawY =
+        null;
 }
 
-
 // ============================================================
-// CLEAR AIR CANVAS
+// CLEAR CANVAS
+// ============================================================
+// ============================================================
+// CLEAR MY DRAWING
 // ============================================================
 
-function clearAirCanvas(
-    broadcast = true
-) {
+function clearCanvas() {
+
+    // --------------------------------------------------------
+    // CLEAR ONLY MY LOCAL DRAWING
+    // --------------------------------------------------------
+
+    clearLocalCanvasOnly();
+
+
+    // --------------------------------------------------------
+    // TELL THE OTHER BROWSER TO CLEAR
+    // THEIR REMOTE COPY OF MY DRAWING
+    // --------------------------------------------------------
 
     if (
-        !airCanvas ||
-        !airCtx
+        ws &&
+        ws.readyState === WebSocket.OPEN
     ) {
 
-        return;
+        ws.send(
+            JSON.stringify({
+
+                type:
+                    "clear_canvas"
+
+            })
+        );
+
+        console.log(
+            "📤 Clear command sent to participant."
+        );
     }
 
 
     // --------------------------------------------------------
-    // CLEAR ENTIRE CANVAS
+    // RESET DRAWING STATE
     // --------------------------------------------------------
+
+    isDrawing =
+        false;
+
+    lastX =
+        0;
+
+    lastY =
+        0;
+
+    window.smoothDrawX =
+        null;
+
+    window.smoothDrawY =
+        null;
+}
+// ============================================================
+// CLEAR LOCAL CANVAS
+// ============================================================
+
+function clearLocalCanvasOnly() {
 
     airCtx.clearRect(
         0,
@@ -2199,1435 +2654,533 @@ function clearAirCanvas(
         airCanvas.height
     );
 
+    isDrawing =
+        false;
 
-    // --------------------------------------------------------
-    // RESTORE NORMAL DRAWING SETTINGS
-    // --------------------------------------------------------
+    lastX =
+        0;
 
-    resetCanvasContext();
-
-
-    // --------------------------------------------------------
-    // RESET DRAWING POSITION
-    // --------------------------------------------------------
-
-    stopDrawing();
+    lastY =
+        0;
+}
 
 
-    // --------------------------------------------------------
-    // RESET GESTURE STATE
-    // --------------------------------------------------------
+// ============================================================
+// CLEAR REMOTE CANVAS
+// ============================================================
 
-    currentGesture =
-        "no_gesture";
-
-    lastConfirmedGesture =
-        "no_gesture";
-
-
-    gestureHistory =
-        [];
-
-
-    // --------------------------------------------------------
-    // UPDATE DISPLAY
-    // --------------------------------------------------------
+function clearRemoteCanvas() {
 
     if (
-        gestureElement
+        !remoteCtx ||
+        !remoteCanvas
     ) {
 
-        gestureElement.textContent =
-            "CLEAR";
+        return;
+    }
+
+    remoteCtx.clearRect(
+        0,
+        0,
+        remoteCanvas.width,
+        remoteCanvas.height
+    );
+}
+
+
+// ============================================================
+// DRAW REMOTE LINE
+// ============================================================
+
+function drawRemoteLine(
+    data
+) {
+
+    if (!remoteCanvas) {
+
+        createRemoteCanvas();
+    }
+
+    if (!remoteCtx) {
+
+        console.error(
+            "❌ Remote drawing context unavailable."
+        );
+
+        return;
     }
 
 
     // --------------------------------------------------------
-    // SEND CLEAR TO OTHER USER
+    // REMOTE ERASE
     // --------------------------------------------------------
 
     if (
-        broadcast &&
-        dataChannel &&
-        dataChannel.readyState === "open"
+        data.action ===
+        "erase"
     ) {
 
-        sendCanvasMessage({
+        eraseRemotePoint(
+            data
+        );
 
-            type:
-                "canvas",
-
-            action:
-                "clear"
-        });
+        return;
     }
+
+
+    // --------------------------------------------------------
+    // REMOTE DRAW
+    // --------------------------------------------------------
+
+    const x =
+        Number(data.x) *
+        remoteCanvas.width;
+
+    const y =
+        Number(data.y) *
+        remoteCanvas.height;
+
+    const lX =
+        Number(data.lastX) *
+        remoteCanvas.width;
+
+    const lY =
+        Number(data.lastY) *
+        remoteCanvas.height;
+
+
+    remoteCtx.beginPath();
+
+    remoteCtx.moveTo(
+        lX,
+        lY
+    );
+
+    remoteCtx.lineTo(
+        x,
+        y
+    );
+
+    remoteCtx.strokeStyle =
+        data.color ||
+        "#00ff00";
+
+    remoteCtx.lineWidth =
+        data.lineWidth ||
+        3;
+
+    remoteCtx.lineCap =
+        "round";
+
+    remoteCtx.lineJoin =
+        "round";
+
+    remoteCtx.stroke();
 
 
     console.log(
-        "CANVAS CLEARED"
+        "🎨 Remote drawing rendered."
     );
 }
 
 
 // ============================================================
-// SEND CANVAS MESSAGE
+// REMOTE ERASE
 // ============================================================
 
-function sendCanvasMessage(message) {
-
-    if (
-        !dataChannel ||
-        dataChannel.readyState !==
-            "open"
-    ) {
-
-        return;
-    }
-
-
-    try {
-
-        dataChannel.send(
-
-            JSON.stringify(
-                message
-            )
-
-        );
-
-    } catch (error) {
-
-        console.error(
-            "Canvas message send error:",
-            error
-        );
-    }
-}
-
-
-// ============================================================
-// SEND CONTROL MESSAGE
-// ============================================================
-
-function sendControlMessage(message) {
-
-    if (
-        !dataChannel ||
-        dataChannel.readyState !==
-            "open"
-    ) {
-
-        console.log("Cannot send control message: data channel not open");
-        return;
-    }
-
-
-    try {
-
-        dataChannel.send(
-
-            JSON.stringify(
-                message
-            )
-
-        );
-
-    } catch (error) {
-
-        console.error(
-            "Control message send error:",
-            error
-        );
-    }
-}
-
-
-// ============================================================
-// UPDATE PERMISSION BUTTON
-// ============================================================
-
-function updatePermissionButton() {
-
-    if (requestDrawPermissionButton) {
-        if (isHost) {
-            requestDrawPermissionButton.textContent = "👑 Host (has permission)";
-            requestDrawPermissionButton.disabled = true;
-            requestDrawPermissionButton.style.opacity = "0.5";
-        } else if (participantDrawPermission) {
-            requestDrawPermissionButton.textContent = "✅ Drawing Allowed";
-            requestDrawPermissionButton.disabled = true;
-            requestDrawPermissionButton.style.opacity = "0.7";
-        } else if (permissionRequestPending) {
-            requestDrawPermissionButton.textContent = "⏳ Request Pending...";
-            requestDrawPermissionButton.disabled = true;
-        } else {
-            requestDrawPermissionButton.textContent = "✏️ Request Draw Permission";
-            requestDrawPermissionButton.disabled = false;
-            requestDrawPermissionButton.style.opacity = "1";
-        }
-    }
-}
-
-
-// ============================================================
-// CREATE DATA CHANNEL FOR HOST
-// ============================================================
-
-function createHostDataChannel() {
-
-    if (!peerConnection) {
-
-        createPeerConnection();
-    }
-
-    if (!dataChannel) {
-
-        const channel =
-            peerConnection.createDataChannel(
-
-                "shared-canvas",
-
-                {
-                    ordered:
-                        true
-                }
-
-            );
-
-        setupDataChannel(
-            channel
-        );
-    }
-}
-
-
-// ============================================================
-// DATA CHANNEL SETUP
-// ============================================================
-
-function setupDataChannel(channel) {
-
-    dataChannel =
-        channel;
-
-
-    // ========================================================
-    // OPEN
-    // ========================================================
-
-    dataChannel.onopen =
-        function() {
-
-            console.log(
-                "Meeting control + canvas channel connected."
-            );
-
-
-            // ------------------------------------------------
-            // SEND USER INFORMATION
-            // ------------------------------------------------
-
-            sendControlMessage({
-
-                type:
-                    "user_info",
-
-                name:
-                    myName,
-
-                role:
-                    isHost
-                        ? "host"
-                        : "participant"
-
-            });
-
-
-            updatePermissionButton();
-
-
-            // ------------------------------------------------
-            // HOST SENDS CURRENT CANVAS
-            // ------------------------------------------------
-
-            if (
-                isHost
-            ) {
-
-                setTimeout(
-                    sendCanvasSnapshot,
-                    500
-                );
-            }
-        };
-
-
-    // ========================================================
-    // CLOSE
-    // ========================================================
-
-    dataChannel.onclose =
-        function() {
-
-            console.log(
-                "Meeting control + canvas channel disconnected."
-            );
-
-
-            dataChannel =
-                null;
-
-
-            permissionRequestPending =
-                false;
-
-
-            updatePermissionButton();
-        };
-
-
-    // ========================================================
-    // ERROR
-    // ========================================================
-
-    dataChannel.onerror =
-        function(error) {
-
-            console.error(
-                "Data channel error:",
-                error
-            );
-        };
-
-
-    // ========================================================
-    // MESSAGE
-    // ========================================================
-
-    dataChannel.onmessage =
-        function(event) {
-
-            try {
-
-                const message =
-                    JSON.parse(
-                        event.data
-                    );
-
-
-                // ==================================================
-                // USER INFORMATION
-                // ==================================================
-
-                if (
-                    message.type ===
-                    "user_info"
-                ) {
-
-                    remoteName =
-                        message.name ||
-                        "Participant";
-
-
-                    updateParticipantNames();
-                    
-                    // ==================================================
-                    // GUEST REQUESTS DRAWING PERMISSION AUTOMATICALLY
-                    // ==================================================
-                    if (!isHost && !participantDrawPermission && !permissionRequestPending) {
-                        permissionRequestPending = true;
-                        sendControlMessage({
-                            type: "draw_permission_request",
-                            name: myName
-                        });
-                        console.log("📝 Guest automatically requested drawing permission from host.");
-                        updatePermissionButton();
-                    }
-
-
-                    return;
-                }
-
-
-                // ==================================================
-                // DRAW PERMISSION REQUEST
-                // ==================================================
-
-                if (
-                    message.type ===
-                    "draw_permission_request"
-                ) {
-
-                    // Only host handles permission requests
-                    if (
-                        !isHost
-                    ) {
-
-                        return;
-                    }
-
-
-                    const requester =
-                        message.name ||
-                        remoteName ||
-                        "Participant";
-
-
-                    const allow =
-                        window.confirm(
-
-                            requester +
-                            " wants permission to draw.\n\n" +
-
-                            "OK = Allow drawing\n" +
-
-                            "Cancel = Deny drawing"
-
-                        );
-
-
-                    sendControlMessage({
-
-                        type:
-                            "draw_permission_response",
-
-                        allowed:
-                            allow
-
-                    });
-
-
-                    return;
-                }
-
-
-                // ==================================================
-                // DRAW PERMISSION RESPONSE
-                // ==================================================
-
-                if (
-                    message.type ===
-                    "draw_permission_response"
-                ) {
-
-                    // Only participant handles response
-                    if (
-                        isHost
-                    ) {
-
-                        return;
-                    }
-
-
-                    participantDrawPermission =
-                        message.allowed === true;
-
-
-                    permissionRequestPending =
-                        false;
-
-
-                    updatePermissionButton();
-
-
-                    if (
-                        participantDrawPermission
-                    ) {
-
-                        alert(
-                            "✅ Host allowed you to draw."
-                        );
-
-                    } else {
-
-                        alert(
-                            "❌ Host denied drawing permission."
-                        );
-                    }
-
-
-                    return;
-                }
-
-
-                // ==================================================
-                // DRAW PERMISSION REVOKED
-                // ==================================================
-
-                if (
-                    message.type ===
-                    "draw_permission_revoke"
-                ) {
-
-                    // Only participant needs to process this
-                    if (
-                        !isHost
-                    ) {
-
-                        participantDrawPermission =
-                            false;
-
-
-                        permissionRequestPending =
-                            false;
-
-
-                        stopDrawing();
-
-
-                        updatePermissionButton();
-
-
-                        alert(
-                            "⚠️ The host has disabled your drawing permission."
-                        );
-                    }
-
-
-                    return;
-                }
-
-
-                // ==================================================
-                // IGNORE NON-CANVAS MESSAGES
-                // ==================================================
-
-                if (
-                    message.type !==
-                    "canvas"
-                ) {
-
-                    return;
-                }
-
-
-                // ==================================================
-                // REMOTE DRAW
-                // ==================================================
-
-                if (
-                    message.action ===
-                    "draw"
-                ) {
-
-                    drawRemoteLine(
-                        message
-                    );
-
-
-                    return;
-                }
-
-
-                // ==================================================
-                // REMOTE ERASE
-                // ==================================================
-
-                if (
-                    message.action ===
-                    "erase"
-                ) {
-
-                    eraseRemotePoint(
-                        message
-                    );
-
-
-                    return;
-                }
-
-
-                // ==================================================
-                // REMOTE CLEAR
-                // ==================================================
-
-                if (
-                    message.action ===
-                    "clear"
-                ) {
-
-                    clearAirCanvas(
-                        false
-                    );
-
-
-                    return;
-                }
-
-
-                // ==================================================
-                // CANVAS SNAPSHOT
-                // ==================================================
-
-                if (
-                    message.action ===
-                    "snapshot"
-                ) {
-
-                    if (
-                        message.image
-                    ) {
-
-                        receiveCanvasSnapshot(
-                            message.image
-                        );
-                    }
-
-
-                    return;
-                }
-
-
-            } catch (error) {
-
-                console.error(
-                    "Data channel message error:",
-                    error
-                );
-            }
-        };
-}
-
-
-// ============================================================
-// OFFER
-// ============================================================
-
-async function createOffer() {
-
-    createPeerConnection();
-
-    createHostDataChannel();
-
-    const offer =
-        await peerConnection.createOffer();
-
-    await peerConnection.setLocalDescription(
-        offer
-    );
-
-    socket.send(
-
-        JSON.stringify({
-
-            type:
-                "offer",
-
-            offer:
-                offer
-
-        })
-    );
-}
-
-
-// ============================================================
-// HANDLE OFFER
-// ============================================================
-
-async function handleOffer(
-    offer
+function eraseRemotePoint(
+    data
 ) {
 
-    createPeerConnection();
-
-    await peerConnection.setRemoteDescription(
-
-        new RTCSessionDescription(
-            offer
-        )
-    );
-
-    const answer =
-        await peerConnection.createAnswer();
-
-    await peerConnection.setLocalDescription(
-        answer
-    );
-
-    socket.send(
-
-        JSON.stringify({
-
-            type:
-                "answer",
-
-            answer:
-                answer
-
-        })
-    );
-}
-
-
-// ============================================================
-// HANDLE ANSWER
-// ============================================================
-
-async function handleAnswer(
-    answer
-) {
-
-    if (!peerConnection) {
+    if (!remoteCtx) {
         return;
     }
 
-    await peerConnection.setRemoteDescription(
 
-        new RTCSessionDescription(
-            answer
-        )
+    const x =
+        Number(data.x) *
+        remoteCanvas.width;
+
+    const y =
+        Number(data.y) *
+        remoteCanvas.height;
+
+
+    remoteCtx.globalCompositeOperation =
+        "destination-out";
+
+
+    remoteCtx.beginPath();
+
+    remoteCtx.arc(
+        x,
+        y,
+        20,
+        0,
+        2 * Math.PI
     );
+
+
+    remoteCtx.fill();
+
+
+    remoteCtx.globalCompositeOperation =
+        "source-over";
 }
 
 
 // ============================================================
-// ICE
+// MUTE
 // ============================================================
 
-async function handleIceCandidate(
-    candidate
-) {
+function toggleMute() {
 
-    if (!peerConnection) {
+    if (!localStream) {
         return;
     }
 
-    try {
-
-        await peerConnection.addIceCandidate(
-
-            new RTCIceCandidate(
-                candidate
-            )
-
-        );
-
-    } catch (error) {
-
-        console.error(
-            "ICE error:",
-            error
-        );
-    }
-}
-
-
-// ============================================================
-// WEBSOCKET
-// ============================================================
-
-function connectSignaling(
-    meetingId
-) {
-
-    return new Promise(
-
-        (resolve, reject) => {
-
-            const url =
-                `${WS_BASE}/ws/meeting/${encodeURIComponent(meetingId)}`;
-
-            console.log(
-                "Connecting:",
-                url
-            );
-
-            socket =
-                new WebSocket(
-                    url
-                );
-
-            socket.onopen =
-                function() {
-
-                    console.log(
-                        "WebSocket connected."
-                    );
-
-                    resolve();
-                };
-
-            socket.onerror =
-                function(error) {
-
-                    console.error(
-                        "WebSocket error:",
-                        error
-                    );
-
-                    reject(error);
-                };
-
-            socket.onclose =
-                function() {
-
-                    console.log(
-                        "WebSocket closed."
-                    );
-                };
-
-            socket.onmessage =
-                async function(event) {
-
-                    try {
-
-                        const message =
-                            JSON.parse(
-                                event.data
-                            );
-
-                        await handleSignalingMessage(
-                            message
-                        );
-
-                    } catch (error) {
-
-                        console.error(
-                            "Signaling error:",
-                            error
-                        );
-                    }
-                };
-
-        }
-
-    );
-}
-
-
-// ============================================================
-// SIGNALING HANDLER
-// ============================================================
-
-async function handleSignalingMessage(
-    message
-) {
-
-    console.log(
-        "Signaling:",
-        message
-    );
+    const tracks =
+        localStream.getAudioTracks();
 
     if (
-        message.type ===
-        "joined"
+        tracks.length === 0
     ) {
-
-        isHost =
-            message.role ===
-            "host";
-
-        updateParticipantNames();
-
-        connectionStatus.textContent =
-            isHost
-                ? "Meeting: Waiting for participant"
-                : "Meeting: Connecting...";
-
-        updatePermissionButton();
 
         return;
     }
 
-    if (
-        message.type ===
-        "participant_joined"
-    ) {
 
-        if (isHost) {
+    const currentlyEnabled =
+        tracks[0].enabled;
 
-            connectionStatus.textContent =
-                "Participant: Connecting...";
 
-            createPeerConnection();
+    tracks.forEach(
+        track => {
 
-            createHostDataChannel();
-
-            await createOffer();
+            track.enabled =
+                !currentlyEnabled;
         }
-
-        return;
-    }
-
-    if (
-        message.type ===
-        "offer"
-    ) {
-
-        await handleOffer(
-            message.offer
-        );
-
-        return;
-    }
-
-    if (
-        message.type ===
-        "answer"
-    ) {
-
-        await handleAnswer(
-            message.answer
-        );
-
-        return;
-    }
-
-    if (
-        message.type ===
-        "ice_candidate"
-    ) {
-
-        await handleIceCandidate(
-            message.candidate
-        );
-
-        return;
-    }
-
-    if (
-        message.type ===
-        "participant_left"
-    ) {
-
-        connectionStatus.textContent =
-            "Meeting: Waiting for participant";
-
-        remoteVideo.srcObject =
-            null;
-
-        remoteVideo.style.display =
-            "none";
-
-        if (waitingParticipant) {
-
-            waitingParticipant.style.display =
-                "flex";
-        }
-
-        remoteName =
-            "Participant";
-
-        updateParticipantNames();
-
-        if (peerConnection) {
-
-            peerConnection.close();
-
-            peerConnection =
-                null;
-        }
-
-        dataChannel =
-            null;
-            
-        participantDrawPermission = false;
-        permissionRequestPending = false;
-        updatePermissionButton();
-
-        return;
-    }
-
-    if (
-        message.type ===
-        "room_full"
-    ) {
-
-        alert(
-            "This meeting already has two participants."
-        );
-
-        if (socket) {
-
-            socket.close();
-        }
-
-        return;
-    }
-}
-
-
-// ============================================================
-// OPEN MEETING
-// ============================================================
-
-async function openMeeting(
-    meetingId
-) {
-
-    currentMeetingId =
-        meetingId;
-
-    homeScreen.classList.add(
-        "hidden"
     );
 
-    meetingScreen.classList.remove(
-        "hidden"
-    );
 
-    meetingIdDisplay.textContent =
-        `Meeting ID: ${meetingId}`;
-
-    meetingIdLarge.textContent =
-        meetingId;
-
-    updateParticipantNames();
-    updatePermissionButton();
-
-    connectionStatus.textContent =
-        "Connecting to meeting...";
-
-    try {
-
-        await connectSignaling(
-            meetingId
-        );
-
-    } catch (error) {
-
-        console.error(
-            "Meeting connection failed:",
-            error
-        );
-
-        connectionStatus.textContent =
-            "Meeting connection failed";
-
-        alert(
-            "Could not connect to the meeting server."
-        );
-    }
-}
-
-
-// ============================================================
-// START CAMERA - HOME
-// ============================================================
-
-if (homeStartCamera) {
-
-    homeStartCamera.addEventListener(
-        "click",
-        async function() {
-
-            await startCamera();
-
-        }
-    );
-}
-
-
-// ============================================================
-// START CAMERA - MEETING
-// ============================================================
-
-if (startCameraButton) {
-
-    startCameraButton.addEventListener(
-        "click",
-        async function() {
-
-            await startCamera();
-
-        }
-    );
-}
-
-
-// ============================================================
-// REQUEST DRAW PERMISSION
-// ============================================================
-
-if (requestDrawPermissionButton) {
-
-    requestDrawPermissionButton.addEventListener(
-        "click",
-        function() {
-
-            if (isHost) {
-                alert("👑 You are the host. You already have drawing permission.");
-                return;
-            }
-
-            if (permissionRequestPending) {
-                alert("⏳ Permission request already sent. Waiting for host...");
-                return;
-            }
-
-            if (participantDrawPermission) {
-                alert("✅ You already have drawing permission.");
-                return;
-            }
-
-            permissionRequestPending = true;
-            sendControlMessage({
-                type: "draw_permission_request",
-                name: myName
-            });
-            updatePermissionButton();
-            alert("📝 Permission request sent to host.");
-        }
-    );
-}
-
-
-// ============================================================
-// CREATE MEETING
-// ============================================================
-
-createMeetingButton.addEventListener(
-    "click",
-    async function() {
-
-        const name =
-            getNameFromUI();
-
-        if (!name) {
-            return;
-        }
-
-        if (!stream) {
-
-            const started =
-                await startCamera();
-
-            if (!started) {
-                return;
-            }
-        }
-
-        myName =
-            name;
-
-        isHost =
-            true;
-
-        const meetingId =
-            Math.random()
-                .toString(36)
-                .substring(2, 8)
-                .toUpperCase();
-
-        await openMeeting(
-            meetingId
-        );
-
-    }
-);
-
-
-// ============================================================
-// JOIN MEETING
-// ============================================================
-
-joinMeetingButton.addEventListener(
-    "click",
-    async function() {
-
-        const name =
-            getNameFromUI();
-
-        if (!name) {
-            return;
-        }
-
-        const meetingId =
-            meetingIdInput.value
-                .trim()
-                .toUpperCase();
-
-        if (!meetingId) {
-
-            meetingIdInput.focus();
-
-            alert(
-                "Please enter the Meeting ID."
-            );
-
-            return;
-        }
-
-        if (!stream) {
-
-            const started =
-                await startCamera();
-
-            if (!started) {
-                return;
-            }
-        }
-
-        myName =
-            name;
-
-        isHost =
-            false;
-
-        await openMeeting(
-            meetingId
-        );
-
-    }
-);
-
-
-// ============================================================
-// CLEAR
-// ============================================================
-
-clearCanvasButton.addEventListener(
-    "click",
-    function() {
-
-        clearAirCanvas(
-            true
-        );
-
-    }
-);
-
-
-// ============================================================
-// MIC
-// ============================================================
-
-muteButton.addEventListener(
-    "click",
-    function() {
-
-        if (!stream) {
-
-            alert(
-                "Start the camera first."
-            );
-
-            return;
-        }
-
-        const audioTracks =
-            stream.getAudioTracks();
-
-        if (
-            audioTracks.length ===
-            0
-        ) {
-
-            alert(
-                "Microphone not available."
-            );
-
-            return;
-        }
-
-        isMuted =
-            !isMuted;
-
-        audioTracks.forEach(
-            track => {
-
-                track.enabled =
-                    !isMuted;
-
-            }
-        );
+    if (
+        currentlyEnabled
+    ) {
 
         muteButton.textContent =
-            isMuted
-                ? "🔇 Unmute"
-                : "🎤 Mic";
+            "🔇 Muted";
 
-        updateCameraStatus();
-
-    }
-);
-
-
-// ============================================================
-// CAMERA ON / OFF
-// ============================================================
-
-cameraButton.addEventListener(
-    "click",
-    function() {
-
-        if (!stream) {
-
-            alert(
-                "Start the camera first."
-            );
-
-            return;
-        }
-
-        const videoTracks =
-            stream.getVideoTracks();
-
-        if (
-            videoTracks.length ===
-            0
-        ) {
-            return;
-        }
-
-        isCameraOff =
-            !isCameraOff;
-
-        videoTracks.forEach(
-            track => {
-
-                track.enabled =
-                    !isCameraOff;
-
-            }
+        muteButton.classList.add(
+            "muted"
         );
 
-        cameraButton.textContent =
-            isCameraOff
-                ? "📹 Turn Camera On"
-                : "📹 Camera";
+    } else {
 
-        updateCameraStatus();
+        muteButton.textContent =
+            "🎤 Mic";
 
+        muteButton.classList.remove(
+            "muted"
+        );
     }
-);
+}
+
+
+// ============================================================
+// CAMERA TOGGLE
+// ============================================================
+
+function toggleCamera() {
+
+    if (!localStream) {
+        return;
+    }
+
+    const tracks =
+        localStream.getVideoTracks();
+
+    if (
+        tracks.length === 0
+    ) {
+
+        return;
+    }
+
+
+    const currentlyEnabled =
+        tracks[0].enabled;
+
+
+    tracks.forEach(
+        track => {
+
+            track.enabled =
+                !currentlyEnabled;
+        }
+    );
+
+
+    if (
+        currentlyEnabled
+    ) {
+
+        cameraButton.textContent =
+            "🚫 Camera Off";
+
+        cameraButton.classList.add(
+            "camera-off"
+        );
+
+    } else {
+
+        cameraButton.textContent =
+            "📹 Camera";
+
+        cameraButton.classList.remove(
+            "camera-off"
+        );
+    }
+}
 
 
 // ============================================================
 // COPY MEETING ID
 // ============================================================
 
-copyMeetingId.addEventListener(
-    "click",
-    async function() {
+async function copyMeetingIdToClipboard() {
 
-        if (!currentMeetingId) {
-            return;
-        }
+    if (!meetingId) {
+        return;
+    }
+
+    try {
+
+        await navigator.clipboard.writeText(
+            meetingId
+        );
+
+        copyMeetingId.textContent =
+            "✅ Copied!";
+
+        setTimeout(
+            () => {
+
+                copyMeetingId.textContent =
+                    "Copy ID";
+
+            },
+            1500
+        );
+
+    } catch (error) {
+
+        console.error(
+            "❌ Copy failed:",
+            error
+        );
+    }
+}
+
+
+// ============================================================
+// CLOSE PEER CONNECTION
+// ============================================================
+
+function closePeerConnection() {
+
+    if (peerConnection) {
 
         try {
 
-            await navigator.clipboard.writeText(
-                currentMeetingId
-            );
-
-            copyMeetingId.textContent =
-                "Copied!";
-
-            setTimeout(
-                function() {
-
-                    copyMeetingId.textContent =
-                        "Copy ID";
-
-                },
-                1500
-            );
+            peerConnection.close();
 
         } catch (error) {
 
             console.error(
-                "Copy failed:",
+                "Peer close error:",
                 error
             );
         }
 
+        peerConnection =
+            null;
     }
-);
+
+    pendingIceCandidates = [];
+}
 
 
 // ============================================================
-// LEAVE
+// LEAVE MEETING
 // ============================================================
 
-leaveMeetingButton.addEventListener(
-    "click",
-    function() {
+function leaveMeeting() {
 
-        if (socket) {
+    if (
+        ws &&
+        ws.readyState ===
+            WebSocket.OPEN
+    ) {
 
-            socket.close();
-
-            socket =
-                null;
-        }
-
-        if (peerConnection) {
-
-            peerConnection.close();
-
-            peerConnection =
-                null;
-        }
-
-        dataChannel =
-            null;
-
-        remoteVideo.srcObject =
-            null;
-
-        remoteVideo.style.display =
-            "none";
-
-        if (waitingParticipant) {
-
-            waitingParticipant.style.display =
-                "flex";
-        }
-
-        clearAirCanvas(
-            false
+        ws.send(
+            JSON.stringify({
+                type:
+                    "leave_meeting"
+            })
         );
-
-        meetingScreen.classList.add(
-            "hidden"
-        );
-
-        homeScreen.classList.remove(
-            "hidden"
-        );
-
-        currentMeetingId =
-            null;
-
-        isHost =
-            false;
-
-        remoteName =
-            "Participant";
-            
-        participantDrawPermission = false;
-        permissionRequestPending = false;
-
-        updateParticipantNames();
-        updatePermissionButton();
-
-        connectionStatus.textContent =
-            "Backend: Checking...";
-
-        if (stream) {
-
-            homeStartCamera.textContent =
-                "✓ Camera Started";
-        }
-
     }
-);
+
+
+    closePeerConnection();
+
+
+    if (ws) {
+
+        try {
+            ws.close();
+        } catch (error) {}
+
+        ws = null;
+    }
+
+
+    if (localStream) {
+
+        localStream
+            .getTracks()
+            .forEach(
+                track =>
+                    track.stop()
+            );
+
+        localStream =
+            null;
+    }
+
+
+    if (camera) {
+
+        try {
+            camera.stop();
+        } catch (error) {}
+
+        camera =
+            null;
+    }
+
+
+    mediaPipeStarted =
+        false;
+
+    isCameraStarted =
+        false;
+
+
+    meetingScreen.classList.add(
+        "hidden"
+    );
+
+    homeScreen.classList.remove(
+        "hidden"
+    );
+
+
+    homeStartCamera.textContent =
+        "🎥 Start Camera";
+
+    homeStartCamera.disabled =
+        false;
+
+
+    startCameraBtn.textContent =
+        "Start Camera";
+
+    startCameraBtn.disabled =
+        false;
+
+
+    cameraStatus.textContent =
+        "Camera is off";
+
+
+    remoteVideo.srcObject =
+        null;
+
+    remoteVideo.style.display =
+        "none";
+
+
+    remoteAudio.srcObject =
+        null;
+
+
+    clearLocalCanvasOnly();
+
+    clearRemoteCanvas();
+
+
+    landmarkCtx.clearRect(
+        0,
+        0,
+        landmarkCanvas.width,
+        landmarkCanvas.height
+    );
+
+
+    participants = [];
+
+    creatorName = "";
+
+    meetingId = null;
+
+    userName = "";
+
+    isMeetingCreator =
+        false;
+
+
+    console.log(
+        "👋 Left meeting."
+    );
+}
 
 
 // ============================================================
-// INITIAL UI
+// GENERATE MEETING ID
 // ============================================================
 
-updateParticipantNames();
-updateCameraStatus();
-updatePermissionButton();
+function generateMeetingId() {
+
+    const chars =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+    let id = "";
 
 
-// Camera stays OFF initially.
-// User can start it manually or create/join a meeting.
+    for (
+        let i = 0;
+        i < 6;
+        i++
+    ) {
+
+        id +=
+            chars.charAt(
+                Math.floor(
+                    Math.random() *
+                    chars.length
+                )
+            );
+    }
+
+
+    return id;
+}
+
+
+// ============================================================
+// END
+// ============================================================
 
 console.log(
-    "Air Canvas application loaded."
+    "🚀 Air Canvas app.js loaded."
 );

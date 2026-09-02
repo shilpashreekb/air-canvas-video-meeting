@@ -1,39 +1,57 @@
-"""
-Gesture prediction API routes.
+# backend/app/ml/routes.py
 
-Receives 42 MediaPipe X/Y landmark values from the frontend and
-runs the trained KNN pipeline through GesturePredictor.
-"""
-
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from typing import List
+from pathlib import Path
 
-from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from .feature_extraction import normalize_landmarks_single, has_missing_landmarks, NUM_FEATURES
+from .predictor import GesturePredictor
 
-from app.ml.predictor import GesturePredictor
+router = APIRouter(prefix="/api/gesture", tags=["Gesture"])
 
-router = APIRouter(prefix="/api/gesture", tags=["gesture"])
+MODEL_PATH = Path(__file__).parent.parent.parent / "models" / "gesture_knn.joblib"
+predictor = GesturePredictor(str(MODEL_PATH))
 
-predictor = GesturePredictor()
+
+class GestureRequest(BaseModel):
+    landmarks: List[float]
 
 
-class GesturePredictionRequest(BaseModel):
-    landmarks: List[float] = Field(
-        ...,
-        min_length=42,
-        max_length=42,
-        description="42 X/Y values for MediaPipe's 21 hand landmarks.",
+class GestureResponse(BaseModel):
+    raw_gesture: str
+    confirmed_gesture: str
+    confidence: float
+
+
+@router.post("/predict", response_model=GestureResponse)
+async def predict_gesture(request: GestureRequest):
+    if not request.landmarks or len(request.landmarks) < NUM_FEATURES:
+        raise HTTPException(status_code=400, detail=f"Expected {NUM_FEATURES} values")
+    
+    print(f"📥 Received {len(request.landmarks)} landmarks")
+    print(f"📥 First 10: {request.landmarks[:10]}")
+    
+    if has_missing_landmarks(request.landmarks):
+        return GestureResponse(raw_gesture="no_gesture", confirmed_gesture="no_gesture", confidence=0.0)
+    
+    try:
+        normalized = normalize_landmarks_single(request.landmarks[:NUM_FEATURES])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Normalization error: {str(e)}")
+    
+    result = predictor.predict(normalized.tolist())
+    
+    return GestureResponse(
+        raw_gesture=result['raw_gesture'],
+        confirmed_gesture=result['confirmed_gesture'],
+        confidence=result['confidence']
     )
 
 
-@router.post("/predict")
-def predict_gesture(payload: GesturePredictionRequest):
-    """Predict the gesture from one frame of hand landmarks."""
-
-    result = predictor.predict_smoothed(payload.landmarks)
-
+@router.get("/health")
+async def gesture_health():
     return {
-        "raw_gesture": result["raw_gesture"],
-        "confirmed_gesture": result["confirmed_gesture"],
-        "confidence": result["confidence"],
+        "status": "healthy",
+        "model_loaded": predictor.is_loaded
     }

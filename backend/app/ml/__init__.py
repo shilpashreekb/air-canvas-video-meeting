@@ -1,20 +1,21 @@
-from app.ml.feature_extraction import (
-    FEATURE_COLUMNS,
-    NUM_FEATURES,
-    has_missing_landmarks,
-    normalize_landmarks_batch,
+# backend/app/ml/__init__.py
+
+from .routes import router
+from .predictor import GesturePredictor
+from .feature_extraction import (
     normalize_landmarks_single,
+    normalize_landmarks_batch,
+    has_missing_landmarks,
+    NUM_FEATURES,
+    FEATURE_COLUMNS
 )
-from app.ml.preprocessing import GESTURE_CLASSES, build_pipeline
-from app.ml.predictor import GesturePredictor
 
 __all__ = [
-    "FEATURE_COLUMNS",
-    "NUM_FEATURES",
-    "has_missing_landmarks",
-    "normalize_landmarks_batch",
-    "normalize_landmarks_single",
-    "GESTURE_CLASSES",
-    "build_pipeline",
+    "router",
     "GesturePredictor",
+    "normalize_landmarks_single",
+    "normalize_landmarks_batch",
+    "has_missing_landmarks",
+    "NUM_FEATURES",
+    "FEATURE_COLUMNS"
 ]

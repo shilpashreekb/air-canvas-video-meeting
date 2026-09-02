@@ -2,445 +2,400 @@
 <html lang="en">
 
 <head>
-
     <meta charset="UTF-8">
-
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <title>Air Canvas Meeting</title>
 
-    <link
-        rel="stylesheet"
-        href="style.css"
-    >
+    <link rel="stylesheet" href="style.css">
 
+    <link rel="icon" href="data:,">
 </head>
-
 
 <body>
 
-<div class="app">
+    <div class="app">
+
+        <!-- =====================================================
+             HOME SCREEN
+             ===================================================== -->
+
+        <section id="homeScreen" class="screen">
+
+            <div class="home-card">
+
+                <h1>Air Canvas</h1>
+
+                <p class="subtitle">
+                    Interactive video meetings with gesture-based air writing
+                </p>
 
 
-    <!-- =====================================================
-         HOME SCREEN
-         ===================================================== -->
+                <!-- USERNAME -->
 
-    <section
-        id="homeScreen"
-        class="screen"
-    >
-
-        <div class="home-card">
-
-            <h1>Air Canvas</h1>
-
-            <p class="subtitle">
-                Interactive video meetings with
-                gesture-based air writing
-            </p>
+                <input
+                    id="userNameInput"
+                    type="text"
+                    placeholder="Enter your name"
+                    autocomplete="name"
+                    maxlength="30"
+                >
 
 
-            <!-- ================================
-                 USERNAME
-                 ================================ -->
+                <!-- START CAMERA -->
 
-            <input
-                id="userNameInput"
-                type="text"
-                placeholder="Enter your name"
-                autocomplete="name"
-                maxlength="30"
-            >
-
-
-            <!-- ================================
-                 START CAMERA
-                 ================================ -->
-
-            <button
-                id="homeStartCamera"
-                class="primary-button"
-            >
-                🎥 Start Camera
-            </button>
-
-
-            <div
-                id="cameraStatus"
-                class="camera-status"
-            >
-                Camera is off
-            </div>
-
-
-            <!-- ================================
-                 CREATE MEETING
-                 ================================ -->
-
-            <button
-                id="createMeetingButton"
-                class="primary-button"
-            >
-                Create Meeting
-            </button>
-
-
-            <div class="divider">
-                <span>OR</span>
-            </div>
-
-
-            <!-- ================================
-                 MEETING ID
-                 ================================ -->
-
-            <input
-                id="meetingIdInput"
-                type="text"
-                placeholder="Enter Meeting ID"
-                autocomplete="off"
-            >
-
-
-            <button
-                id="joinMeetingButton"
-                class="secondary-button"
-            >
-                Join Meeting
-            </button>
-
-        </div>
-
-    </section>
-
-
-
-    <!-- =====================================================
-         MEETING SCREEN
-         ===================================================== -->
-
-    <section
-        id="meetingScreen"
-        class="screen hidden"
-    >
-
-
-        <!-- =================================================
-             HEADER
-             ================================================= -->
-
-        <header class="header">
-
-            <div class="header-left">
-
-                <h1>
-                    Air Canvas
-                </h1>
+                <button
+                    id="homeStartCamera"
+                    class="primary-button"
+                >
+                    🎥 Start Camera
+                </button>
 
 
                 <div
-                    id="meetingIdDisplay"
-                    class="meeting-id-display"
+                    id="cameraStatus"
+                    class="camera-status"
                 >
-                    Meeting ID: ------
+                    Camera is off
                 </div>
 
-            </div>
 
+                <!-- CREATE MEETING -->
 
-            <div
-                id="connectionStatus"
-                class="connection-status"
-            >
-                Backend: Checking...
-            </div>
-
-        </header>
-
-
-
-        <!-- =================================================
-             MEETING AREA
-             ================================================= -->
-
-        <main class="meeting-main">
-
-
-            <!-- =============================================
-                 MEETING ID BANNER
-                 ============================================= -->
-
-            <div
-                id="meetingBanner"
-                class="meeting-banner"
-            >
-
-                <span>
-                    Meeting ID
-                </span>
-
-
-                <strong
-                    id="meetingIdLarge"
+                <button
+                    id="createMeetingButton"
+                    class="primary-button"
                 >
-                    ------
-                </strong>
+                    Create Meeting
+                </button>
+
+
+                <div class="divider">
+                    <span>OR</span>
+                </div>
+
+
+                <!-- MEETING ID -->
+
+                <input
+                    id="meetingIdInput"
+                    type="text"
+                    placeholder="Enter Meeting ID"
+                    autocomplete="off"
+                >
 
 
                 <button
-                    id="copyMeetingId"
-                    class="copy-button"
+                    id="joinMeetingButton"
+                    class="secondary-button"
                 >
-                    Copy ID
+                    Join Meeting
                 </button>
 
             </div>
 
+        </section>
 
 
-            <!-- =============================================
-                 PARTICIPANTS
-                 ============================================= -->
+        <!-- =====================================================
+             MEETING SCREEN
+             ===================================================== -->
 
-            <div class="participants-grid">
+        <section
+            id="meetingScreen"
+            class="screen hidden"
+        >
 
+            <!-- HEADER -->
 
-                <!-- =========================================
-                     LOCAL PARTICIPANT
-                     ========================================= -->
+            <header class="header">
 
-                <div class="participant-card">
+                <div class="header-left">
+
+                    <h1>Air Canvas</h1>
 
                     <div
-                        id="localParticipantLabel"
-                        class="participant-label"
+                        id="meetingIdDisplay"
+                        class="meeting-id-display"
                     >
-                        You
-                    </div>
-
-
-                    <div class="video-container">
-
-                        <video
-                            id="video"
-                            autoplay
-                            playsinline
-                            muted
-                        ></video>
-
-
-                        <!-- Air Canvas directly over video -->
-
-                        <canvas
-                            id="airCanvas"
-                        ></canvas>
-
-
-                        <!-- Hand landmarks -->
-
-                        <canvas
-                            id="landmarkCanvas"
-                        ></canvas>
-
+                        Meeting ID: ------
                     </div>
 
                 </div>
 
 
+                <div
+                    id="connectionStatus"
+                    class="connection-status"
+                >
+                    Backend: Checking...
+                </div>
 
-                <!-- =========================================
-                     REMOTE PARTICIPANT
-                     ========================================= -->
+            </header>
 
-                <div class="participant-card">
 
-                    <div
-                        id="remoteParticipantLabel"
-                        class="participant-label"
+            <!-- MEETING AREA -->
+
+            <main class="meeting-main">
+
+
+                <!-- MEETING ID -->
+
+                <div
+                    id="meetingBanner"
+                    class="meeting-banner"
+                >
+
+                    <span>Meeting ID</span>
+
+                    <strong id="meetingIdLarge">
+                        ------
+                    </strong>
+
+                    <button
+                        id="copyMeetingId"
+                        class="copy-button"
                     >
-                        Participant
-                    </div>
+                        Copy ID
+                    </button>
+
+                </div>
 
 
-                    <div
-                        class="remote-video-container"
-                    >
+                <!-- =================================================
+                     PARTICIPANTS
+                     ================================================= -->
+
+                <div class="participants-grid">
+
+
+                    <!-- =================================================
+                         LOCAL PARTICIPANT
+                         ================================================= -->
+
+                    <div class="participant-card">
 
                         <div
-                            id="waitingParticipant"
-                            class="waiting-participant"
+                            id="localParticipantLabel"
+                            class="participant-label"
                         >
-
-                            <div
-                                class="participant-avatar"
-                            >
-                                👤
-                            </div>
-
-
-                            <span>
-                                Waiting for participant...
-                            </span>
-
+                            You
                         </div>
 
 
-                        <video
-                            id="remoteVideo"
-                            autoplay
-                            playsinline
-                        ></video>
+                        <div class="video-container">
+
+                            <video
+                                id="video"
+                                autoplay
+                                playsinline
+                                muted
+                            ></video>
+
+
+                            <!-- LOCAL AIR DRAWING -->
+
+                            <canvas
+                                id="airCanvas"
+                            ></canvas>
+
+
+                            <!-- LOCAL HAND SKELETON -->
+
+                            <canvas
+                                id="landmarkCanvas"
+                            ></canvas>
+
+                        </div>
+
+                    </div>
+
+
+
+                    <!-- =================================================
+                         REMOTE PARTICIPANT
+                         ================================================= -->
+
+                    <div class="participant-card">
+
+                        <div
+                            id="remoteParticipantLabel"
+                            class="participant-label"
+                        >
+                            Participant
+                        </div>
+
+
+                        <div class="remote-video-container">
+
+
+                            <!-- WAITING -->
+
+                            <div
+                                id="waitingParticipant"
+                                class="waiting-participant"
+                            >
+
+                                <div class="participant-avatar">
+                                    👤
+                                </div>
+
+                                <span>
+                                    Waiting for participant...
+                                </span>
+
+                            </div>
+
+
+                            <!-- REMOTE VIDEO -->
+
+                            <video
+                                id="remoteVideo"
+                                autoplay
+                                playsinline
+                            ></video>
+
+
+                            <!-- =================================================
+                                 IMPORTANT:
+                                 THIS CANVAS IS FOR THE OTHER PERSON'S DRAWING
+                                 ================================================= -->
+
+                            <canvas
+                                id="remoteCanvas"
+                            ></canvas>
+
+
+                        </div>
 
                     </div>
 
                 </div>
 
-            </div>
 
 
+                <!-- =================================================
+                     STATUS
+                     ================================================= -->
 
-            <!-- =============================================
-                 STATUS
-                 ============================================= -->
+                <div class="status-panel">
 
-            <div class="status-panel">
+                    <div>
 
-                <div>
+                        <span>
+                            Gesture
+                        </span>
 
-                    <span>
-                        Gesture
-                    </span>
+                        <strong id="gesture">
+                            NO GESTURE
+                        </strong>
 
-
-                    <strong id="gesture">
-                        NO GESTURE
-                    </strong>
-
-                </div>
+                    </div>
 
 
-                <div>
+                    <div>
 
-                    <span>
-                        Confidence
-                    </span>
+                        <span>
+                            Confidence
+                        </span>
 
+                        <strong id="confidence">
+                            --
+                        </strong>
 
-                    <strong id="confidence">
-                        --
-                    </strong>
+                    </div>
 
                 </div>
 
-            </div>
 
 
+                <!-- =================================================
+                     CONTROLS
+                     ================================================= -->
 
-            <!-- =============================================
-                 CONTROLS
-                 ============================================= -->
-
-            <div class="meeting-controls">
-
-                <!-- Start Camera remains available -->
-
-                <button
-                    id="startCamera"
-                    class="control-button primary-control"
-                >
-                    Start Camera
-                </button>
+                <div class="meeting-controls">
 
 
-                <!-- Request Draw Permission (Guest only) -->
-
-                <button
-                    id="requestDrawPermission"
-                    class="control-button permission-button"
-                    style="background-color: #6c63ff; color: white;"
-                >
-                    ✏️ Request Draw
-                </button>
+                    <button
+                        id="startCamera"
+                        class="control-button primary-control"
+                    >
+                        Start Camera
+                    </button>
 
 
-                <!-- Clear Canvas -->
+                    <!-- REQUEST DRAW REMOVED -->
 
-                <button
-                    id="clearCanvas"
-                    class="control-button"
-                >
-                    🧹 Clear
-                </button>
-
-
-                <!-- Microphone -->
-
-                <button
-                    id="muteButton"
-                    class="control-button"
-                >
-                    🎤 Mic
-                </button>
+                    <button
+                        id="clearCanvas"
+                        class="control-button"
+                    >
+                        🧹 Clear
+                    </button>
 
 
-                <!-- Camera ON/OFF -->
-
-                <button
-                    id="cameraButton"
-                    class="control-button"
-                >
-                    📹 Camera
-                </button>
+                    <button
+                        id="muteButton"
+                        class="control-button"
+                    >
+                        🎤 Mic
+                    </button>
 
 
-                <!-- Leave -->
-
-                <button
-                    id="leaveMeeting"
-                    class="control-button leave-button"
-                >
-                    Leave
-                </button>
-
-            </div>
-
-        </main>
-
-    </section>
-
-</div>
+                    <button
+                        id="cameraButton"
+                        class="control-button"
+                    >
+                        📹 Camera
+                    </button>
 
 
-<!-- =========================================================
-     REMOTE AUDIO (Hidden - for WebRTC audio)
-     ========================================================= -->
+                    <button
+                        id="leaveMeeting"
+                        class="control-button leave-button"
+                    >
+                        Leave
+                    </button>
 
-<audio
-    id="remoteAudio"
-    autoplay
-    playsinline
-    style="display: none;"
-></audio>
+                </div>
 
+            </main>
 
-<!-- =========================================================
-     MEDIAPIPE
-     ========================================================= -->
+        </section>
 
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    </div>
 
 
-<!-- =========================================================
-     APPLICATION JAVASCRIPT
-     ========================================================= -->
+    <!-- =====================================================
+         REMOTE AUDIO
+         ===================================================== -->
 
-<script src="app.js"></script>
+    <audio
+        id="remoteAudio"
+        autoplay
+        playsinline
+        style="display: none;"
+    ></audio>
+
+
+    <!-- =====================================================
+         MEDIAPIPE
+         ===================================================== -->
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+     
+    <!-- LIVEKIT -->
+    <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
+
+    <!-- APPLICATION -->
+
+    <script src="app.js"></script>
 
 </body>
 
