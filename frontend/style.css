@@ -1,6 +1,7 @@
-/* ============================================
-   RESET & BASE
-   ============================================ */
+/* ============================================================
+   AIR CANVAS MEETING
+   Clean Zoom / Microsoft Teams inspired interface
+   ============================================================ */
 
 * {
     margin: 0;
@@ -8,289 +9,324 @@
     box-sizing: border-box;
 }
 
+:root {
+    --meeting-bg: #111315;
+    --surface: #1b1d20;
+    --surface-2: #23262a;
+    --surface-3: #2c3035;
+    --border: rgba(255, 255, 255, 0.10);
+    --text: #f5f5f5;
+    --muted: #a9adb3;
+    --accent: #4f8cff;
+    --danger: #d94848;
+}
+
+html,
 body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background: linear-gradient(135deg, #0f0c29, #1a1a3e, #16213e);
-    color: #fff;
+    min-height: 100%;
+}
+
+body {
+    font-family: "Segoe UI", Arial, sans-serif;
+    background: var(--meeting-bg);
+    color: var(--text);
     min-height: 100vh;
     overflow-x: hidden;
+}
+
+button,
+input {
+    font: inherit;
+}
+
+button {
+    -webkit-tap-highlight-color: transparent;
 }
 
 .hidden {
     display: none !important;
 }
 
-
-/* ============================================
+/* ============================================================
    HOME SCREEN
-   ============================================ */
+   ============================================================ */
 
 #homeScreen {
     display: flex;
     justify-content: center;
     align-items: center;
     min-height: 100vh;
-    padding: 20px;
+    padding: 24px;
+    background: #f7f8fa;
+    color: #1f2328;
 }
 
 .home-card {
-    background: rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 16px;
-    padding: 40px;
     width: 100%;
-    max-width: 400px;
+    max-width: 430px;
+    padding: 38px;
+    background: #fff;
+    border: 1px solid #e1e4e8;
+    border-radius: 14px;
     text-align: center;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.10);
 }
 
 .home-card h1 {
-    font-size: 2.5rem;
-    margin-bottom: 10px;
-    background: linear-gradient(45deg, #00ff87, #60efff);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    margin-bottom: 8px;
+    font-size: 2.2rem;
+    color: #20242a;
+    background: none;
+    -webkit-text-fill-color: initial;
 }
 
 .subtitle {
-    color: #aaa;
-    margin-bottom: 30px;
+    color: #69717c;
+    margin-bottom: 28px;
     font-size: 0.95rem;
+    line-height: 1.5;
 }
 
 .home-card input {
     width: 100%;
-    padding: 12px;
-    margin-bottom: 15px;
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.3);
+    padding: 13px 14px;
+    margin-bottom: 14px;
+    background: #fff;
+    border: 1px solid #cfd4da;
     border-radius: 8px;
-    color: #fff;
-    font-size: 1rem;
+    color: #20242a;
     outline: none;
 }
 
 .home-card input:focus {
-    border-color: #00ff87;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.12);
+}
+
+.primary-button,
+.secondary-button {
+    width: 100%;
+    padding: 13px 14px;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 10px;
+    transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .primary-button {
-    width: 100%;
-    padding: 14px;
-    background: linear-gradient(45deg, #00ff87, #60efff);
-    border: none;
-    border-radius: 8px;
-    color: #1a1a3e;
-    font-weight: bold;
-    font-size: 1rem;
-    cursor: pointer;
-    margin-bottom: 10px;
-    transition: transform 0.2s, box-shadow 0.2s;
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    color: #fff;
 }
 
 .primary-button:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(0, 255, 135, 0.3);
+    background: #3f7df0;
 }
 
 .primary-button:disabled {
-    opacity: 0.7;
+    opacity: 0.65;
     cursor: not-allowed;
-    transform: none;
 }
 
 .secondary-button {
-    width: 100%;
-    padding: 14px;
-    background: transparent;
-    border: 2px solid #00ff87;
-    border-radius: 8px;
-    color: #00ff87;
-    font-weight: bold;
-    font-size: 1rem;
-    cursor: pointer;
-    transition: background 0.2s;
+    background: #fff;
+    border: 1px solid #b9c0c8;
+    color: #20242a;
 }
 
 .secondary-button:hover {
-    background: rgba(0, 255, 135, 0.1);
+    background: #f1f4f7;
 }
 
 .camera-status {
-    margin: 10px 0;
-    color: #888;
+    margin: 9px 0 15px;
+    color: #69717c;
     font-size: 0.9rem;
 }
 
 .divider {
     display: flex;
     align-items: center;
-    margin: 20px 0;
-    color: #888;
+    margin: 19px 0;
+    color: #8a929d;
 }
 
 .divider::before,
 .divider::after {
-    content: '';
+    content: "";
     flex: 1;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    border-bottom: 1px solid #e0e3e7;
 }
 
 .divider span {
     padding: 0 10px;
-    font-size: 0.9rem;
+    font-size: 0.8rem;
 }
 
-
-/* ============================================
+/* ============================================================
    MEETING SCREEN
-   ============================================ */
+   ============================================================ */
 
 #meetingScreen {
     min-height: 100vh;
     display: flex;
     flex-direction: column;
+    background: var(--meeting-bg);
 }
 
 .header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 15px 25px;
-    background: rgba(0, 0, 0, 0.3);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    min-height: 58px;
+    padding: 10px 18px;
+    background: #181a1d;
+    border-bottom: 1px solid var(--border);
 }
 
 .header-left {
     display: flex;
     align-items: center;
-    gap: 20px;
+    gap: 16px;
+    min-width: 0;
 }
 
 .header h1 {
-    font-size: 1.5rem;
-    background: linear-gradient(45deg, #00ff87, #60efff);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: #fff;
+    background: none;
+    -webkit-text-fill-color: initial;
 }
 
 .meeting-id-display {
-    color: #aaa;
-    font-size: 0.9rem;
+    color: var(--muted);
+    font-size: 0.82rem;
 }
 
 .connection-status {
-    padding: 6px 12px;
-    border-radius: 20px;
-    font-size: 0.85rem;
-    background: rgba(255, 255, 255, 0.1);
+    padding: 5px 9px;
+    border-radius: 5px;
+    color: #bfc4ca;
+    font-size: 0.76rem;
+    background: #23262a;
 }
+
+/* ============================================================
+   MEETING AREA
+   ============================================================ */
 
 .meeting-main {
+    position: relative;
     flex: 1;
-    padding: 20px;
-    max-width: 1400px;
-    margin: 0 auto;
+    min-width: 0;
+    padding: 14px;
     width: 100%;
+    max-width: 1500px;
+    margin: 0 auto;
 }
-
-
-/* ============================================
-   MEETING BANNER
-   ============================================ */
 
 .meeting-banner {
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 15px;
-    background: rgba(255, 255, 255, 0.1);
-    padding: 12px;
-    border-radius: 8px;
-    margin-bottom: 20px;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 10px;
+    margin-bottom: 12px;
+    background: #181a1d;
+    border: 1px solid var(--border);
+    border-radius: 7px;
 }
 
 .meeting-banner span {
-    color: #888;
+    color: var(--muted);
+    font-size: 0.8rem;
 }
 
 .meeting-banner strong {
-    font-size: 1.2rem;
-    letter-spacing: 2px;
+    margin-left: auto;
+    font-size: 0.92rem;
+    letter-spacing: 1.5px;
 }
 
 .copy-button {
-    background: rgba(255, 255, 255, 0.2);
-    border: none;
-    color: #fff;
-    padding: 6px 12px;
-    border-radius: 6px;
+    background: #2a2e33;
+    border: 1px solid #3a3f45;
+    color: #e9ebee;
+    padding: 6px 10px;
+    border-radius: 5px;
     cursor: pointer;
-    font-size: 0.85rem;
-    transition: background 0.2s;
+    font-size: 0.78rem;
 }
 
 .copy-button:hover {
-    background: rgba(255, 255, 255, 0.3);
+    background: #353a40;
 }
 
-
-/* ============================================
-   PARTICIPANTS
-   ============================================ */
+/* ============================================================
+   VIDEO GRID
+   ============================================================ */
 
 .participants-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-    gap: 20px;
-    margin-bottom: 20px;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 10px;
+    margin-bottom: 12px;
 }
 
 .participant-card {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
+    background: #191b1e;
+    border: 1px solid #2b2f34;
+    border-radius: 7px;
     overflow: hidden;
     position: relative;
+    min-width: 0;
 }
 
 .participant-label {
     position: absolute;
-    top: 10px;
-    left: 10px;
-    background: rgba(0, 0, 0, 0.7);
+    top: auto;
+    bottom: 8px;
+    left: 8px;
+    background: rgba(0, 0, 0, 0.70);
     color: #fff;
-    padding: 5px 12px;
-    border-radius: 20px;
-    font-size: 0.85rem;
+    padding: 5px 8px;
+    border-radius: 4px;
+    font-size: 0.78rem;
     z-index: 20;
+    max-width: calc(100% - 16px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-
-/* ============================================
-   LOCAL VIDEO
-   ============================================ */
-
-.video-container {
+.video-container,
+.remote-video-container {
     position: relative;
     width: 100%;
     aspect-ratio: 16 / 9;
-    background: #000;
+    background: #080909;
     overflow: hidden;
 }
 
-.video-container video {
+.video-container video,
+.remote-video-container video {
     width: 100%;
     height: 100%;
     object-fit: cover;
+}
 
-    /* PHONE SELFIE CAMERA */
+.video-container video {
     transform: scaleX(-1);
 }
 
-
-/* Local canvases */
+.remote-video-container video {
+    transform: none !important;
+    display: block;
+    visibility: visible;
+    opacity: 1;
+}
 
 .video-container canvas {
     position: absolute;
@@ -299,15 +335,8 @@ body {
     width: 100%;
     height: 100%;
     pointer-events: none;
-
-    /* Keep skeleton + drawing aligned with selfie camera */
     transform: scaleX(-1);
 }
-
-
-/* ============================================
-   LOCAL CANVAS LAYERS
-   ============================================ */
 
 #airCanvas {
     z-index: 5;
@@ -319,70 +348,26 @@ body {
     background: transparent;
 }
 
-
-/* ============================================
-   REMOTE VIDEO
-   ============================================ */
-
-.remote-video-container {
-    position: relative;
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    background: #000;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    overflow: hidden;
-}
-
-.remote-video-container video {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-
-    /* IMPORTANT:
-       Remote video is NOT mirrored */
-    transform: none;
-
-    display: none;
-}
-
-
-/* ============================================
-   REMOTE DRAWING CANVAS
-   ============================================ */
-
-#remoteCanvas {
+#remoteCanvas,
+.remote-drawing-canvas {
     position: absolute;
-    top: 0;
-    left: 0;
-
+    inset: 0;
     width: 100%;
     height: 100%;
-
     pointer-events: none;
-
     z-index: 5;
-
     background: transparent;
-
-    /* IMPORTANT:
-       Remote drawing is NOT mirrored */
-    transform: none;
+    transform: none !important;
 }
-
-
-/* ============================================
-   WAITING
-   ============================================ */
 
 .waiting-participant {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    color: #888;
+    color: #858b92;
     height: 100%;
+    min-height: 180px;
 }
 
 .waiting-participant.hidden {
@@ -390,23 +375,23 @@ body {
 }
 
 .participant-avatar {
-    font-size: 4rem;
-    margin-bottom: 15px;
+    font-size: 3rem;
+    margin-bottom: 10px;
 }
 
-
-/* ============================================
-   STATUS PANEL
-   ============================================ */
+/* ============================================================
+   STATUS
+   ============================================================ */
 
 .status-panel {
     display: flex;
     justify-content: center;
-    gap: 40px;
-    margin-bottom: 20px;
-    background: rgba(255, 255, 255, 0.05);
-    padding: 15px;
-    border-radius: 8px;
+    gap: 32px;
+    margin-bottom: 12px;
+    padding: 9px 12px;
+    background: #181a1d;
+    border: 1px solid var(--border);
+    border-radius: 7px;
 }
 
 .status-panel div {
@@ -415,100 +400,414 @@ body {
 
 .status-panel span {
     display: block;
-    color: #888;
-    font-size: 0.85rem;
-    margin-bottom: 5px;
+    color: #8f959d;
+    font-size: 0.72rem;
+    margin-bottom: 3px;
 }
 
 .status-panel strong {
-    font-size: 1.1rem;
+    font-size: 0.84rem;
 }
 
-
-/* ============================================
-   CONTROLS
-   ============================================ */
+/* ============================================================
+   MEETING CONTROLS
+   ============================================================ */
 
 .meeting-controls {
     display: flex;
     justify-content: center;
+    align-items: center;
     gap: 10px;
     flex-wrap: wrap;
-    padding: 15px;
-    background: rgba(0, 0, 0, 0.4);
-    border-radius: 12px;
-    position: sticky;
-    bottom: 20px;
+    padding: 10px 12px;
+    background: #181a1d;
+    border-top: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.control-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .control-button {
-    padding: 12px 20px;
-    border: none;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.15);
-    color: #fff;
-    font-size: 0.9rem;
+    position: relative;
+    min-width: 76px;
+    min-height: 52px;
+    padding: 7px 11px;
+    border: 1px solid #363b41;
+    border-radius: 7px;
+    background: #25282c;
+    color: #f1f2f3;
     cursor: pointer;
-    transition: background 0.2s, transform 0.2s;
+    transition: background 0.12s ease, border-color 0.12s ease;
 }
 
 .control-button:hover {
-    background: rgba(255, 255, 255, 0.25);
-    transform: translateY(-2px);
+    background: #30343a;
+    border-color: #4a5057;
 }
 
 .control-button:disabled {
-    opacity: 0.5;
+    opacity: 0.45;
     cursor: not-allowed;
-    transform: none;
+}
+
+.control-icon,
+.control-text {
+    display: block;
+}
+
+.control-icon {
+    font-size: 1.05rem;
+    line-height: 1.15;
+}
+
+.control-text {
+    margin-top: 3px;
+    font-size: 0.68rem;
+}
+
+.hidden-control {
+    display: none !important;
 }
 
 .primary-control {
-    background: linear-gradient(45deg, #00ff87, #60efff);
-    color: #1a1a3e;
-    font-weight: bold;
-}
-
-.leave-button {
-    background: #f44336;
+    background: var(--accent);
+    border-color: var(--accent);
     color: #fff;
 }
 
+.leave-button {
+    min-width: 82px;
+    background: #b93636;
+    border-color: #b93636;
+}
+
 .leave-button:hover {
-    background: #d32f2f;
+    background: #d04444;
 }
 
 .muted {
-    background: #ff9800 !important;
+    background: #7b3d3d !important;
 }
 
 .camera-off {
-    background: #f44336 !important;
+    background: #7b3d3d !important;
 }
 
+.toolbar-count {
+    position: absolute;
+    top: 3px;
+    right: 6px;
+    min-width: 16px;
+    padding: 1px 4px;
+    border-radius: 8px;
+    background: #4f8cff;
+    color: #fff;
+    font-size: 0.62rem;
+    line-height: 1.3;
+}
 
-/* ============================================
+.notification-badge {
+    position: absolute;
+    top: 3px;
+    right: 6px;
+    min-width: 16px;
+    padding: 1px 4px;
+    border-radius: 8px;
+    background: #e44d4d;
+    color: #fff;
+    font-size: 0.62rem;
+    line-height: 1.3;
+}
+
+/* ============================================================
+   SIDE PANELS
+   ============================================================ */
+
+.meeting-side-panel {
+    position: fixed;
+    top: 58px;
+    right: 0;
+    bottom: 0;
+    z-index: 100;
+    width: min(360px, 92vw);
+    display: flex;
+    flex-direction: column;
+    background: #1b1d20;
+    border-left: 1px solid #34383e;
+    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.30);
+}
+
+.side-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 15px 16px;
+    border-bottom: 1px solid #34383e;
+}
+
+.side-panel-header strong {
+    display: block;
+    font-size: 0.98rem;
+    font-weight: 600;
+}
+
+.side-panel-subtitle {
+    display: block;
+    margin-top: 3px;
+    color: #9298a0;
+    font-size: 0.72rem;
+}
+
+.side-panel-close {
+    width: 30px;
+    height: 30px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: #cdd1d6;
+    font-size: 1.35rem;
+    cursor: pointer;
+}
+
+.side-panel-close:hover {
+    background: #2c3035;
+}
+
+/* ============================================================
+   CHAT
+   ============================================================ */
+
+.chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px;
+}
+
+.chat-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 220px;
+    text-align: center;
+    color: #a0a6ad;
+    font-size: 0.85rem;
+}
+
+.chat-empty small {
+    max-width: 230px;
+    margin-top: 5px;
+    color: #747b84;
+    line-height: 1.4;
+}
+
+.chat-empty-icon {
+    margin-bottom: 9px;
+    font-size: 2rem;
+}
+
+.chat-message {
+    margin-bottom: 13px;
+}
+
+.chat-message-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    margin-bottom: 4px;
+}
+
+.chat-message-name {
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: #dfe2e6;
+}
+
+.chat-message-time {
+    color: #747b84;
+    font-size: 0.64rem;
+}
+
+.chat-message-bubble {
+    display: inline-block;
+    max-width: 90%;
+    padding: 8px 10px;
+    background: #2a2e33;
+    border-radius: 7px;
+    color: #eef0f2;
+    font-size: 0.82rem;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.chat-message.mine .chat-message-bubble {
+    background: #315fba;
+}
+
+.chat-composer {
+    display: flex;
+    gap: 8px;
+    padding: 11px;
+    border-top: 1px solid #34383e;
+    background: #181a1d;
+}
+
+.chat-composer input {
+    flex: 1;
+    min-width: 0;
+    padding: 9px 10px;
+    border: 1px solid #3a3f45;
+    border-radius: 6px;
+    outline: none;
+    background: #25282c;
+    color: #f2f3f4;
+}
+
+.chat-composer input:focus {
+    border-color: var(--accent);
+}
+
+.chat-composer button {
+    width: 40px;
+    border: 0;
+    border-radius: 6px;
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+}
+
+/* ============================================================
+   PARTICIPANTS PANEL
+   ============================================================ */
+
+.participants-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 9px 10px 18px;
+}
+
+.participant-list-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 7px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.participant-list-avatar {
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    flex: 0 0 32px;
+    border-radius: 50%;
+    background: #343940;
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.participant-list-info {
+    min-width: 0;
+    flex: 1;
+}
+
+.participant-list-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.82rem;
+    color: #f0f1f2;
+}
+
+.participant-list-role {
+    margin-top: 2px;
+    color: #858c95;
+    font-size: 0.68rem;
+}
+
+.participant-draw-status {
+    flex: 0 0 auto;
+    color: #8faef0;
+    font-size: 0.66rem;
+}
+
+/* Existing permission cards are kept functional, but made less "AI dashboard"-like. */
+#drawingPermissionsPanel,
+#drawingPermissionRequestPanel {
+    background: #1b1d20 !important;
+    border: 1px solid #34383e !important;
+    border-radius: 7px !important;
+    color: #e8eaec;
+}
+
+#drawingPermissionsPanel button,
+#drawingPermissionRequestPanel button {
+    background: #2c3035;
+    color: #f2f3f4;
+    border: 1px solid #41464d;
+}
+
+#drawingPermissionsPanel button:hover,
+#drawingPermissionRequestPanel button:hover {
+    background: #373c42;
+}
+
+#drawingPermissionsPanel button:disabled {
+    opacity: 0.45;
+}
+
+/* ============================================================
    RESPONSIVE
-   ============================================ */
+   ============================================================ */
 
-@media (max-width: 768px) {
+@media (max-width: 850px) {
+    .header-left {
+        gap: 9px;
+    }
+
+    .meeting-id-display {
+        display: none;
+    }
 
     .participants-grid {
         grid-template-columns: 1fr;
     }
 
-    .header {
-        flex-direction: column;
-        gap: 10px;
-        text-align: center;
+    .meeting-controls {
+        gap: 7px;
     }
 
-    .meeting-controls {
-        gap: 8px;
+    .control-group {
+        gap: 5px;
     }
 
     .control-button {
-        padding: 10px 15px;
-        font-size: 0.85rem;
+        min-width: 64px;
+        min-height: 48px;
+        padding: 6px 8px;
+    }
+}
+
+@media (max-width: 560px) {
+    .meeting-main {
+        padding: 8px;
+    }
+
+    .meeting-banner {
+        font-size: 0.78rem;
+    }
+
+    .status-panel {
+        gap: 20px;
+    }
+
+    .control-text {
+        font-size: 0.61rem;
     }
 }

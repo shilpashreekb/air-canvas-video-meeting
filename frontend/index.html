@@ -315,50 +315,120 @@
 
                 <div class="meeting-controls">
 
+                    <div class="control-group">
+                        <button
+                            id="muteButton"
+                            class="control-button meeting-action"
+                            title="Mute or unmute microphone"
+                        >
+                            <span class="control-icon">🎤</span>
+                            <span class="control-text">Mute</span>
+                        </button>
 
-                    <button
-                        id="startCamera"
-                        class="control-button primary-control"
-                    >
-                        Start Camera
-                    </button>
+                        <button
+                            id="cameraButton"
+                            class="control-button meeting-action"
+                            title="Turn camera on or off"
+                        >
+                            <span class="control-icon">📹</span>
+                            <span class="control-text">Camera</span>
+                        </button>
 
+                        <button
+                            id="startCamera"
+                            class="control-button meeting-action hidden-control"
+                            title="Start camera"
+                        >
+                            <span class="control-icon">📹</span>
+                            <span class="control-text">Start</span>
+                        </button>
 
-                    <!-- REQUEST DRAW REMOVED -->
+                        <button
+                            id="clearCanvas"
+                            class="control-button meeting-action"
+                            title="Clear your canvas"
+                        >
+                            <span class="control-icon">🧹</span>
+                            <span class="control-text">Clear</span>
+                        </button>
 
-                    <button
-                        id="clearCanvas"
-                        class="control-button"
-                    >
-                        🧹 Clear
-                    </button>
+                        <button
+                            id="chatButton"
+                            class="control-button meeting-action"
+                            type="button"
+                            title="Open chat"
+                        >
+                            <span class="control-icon">💬</span>
+                            <span class="control-text">Chat</span>
+                            <span id="chatUnreadBadge" class="notification-badge hidden">0</span>
+                        </button>
 
-
-                    <button
-                        id="muteButton"
-                        class="control-button"
-                    >
-                        🎤 Mic
-                    </button>
-
-
-                    <button
-                        id="cameraButton"
-                        class="control-button"
-                    >
-                        📹 Camera
-                    </button>
-
+                        <button
+                            id="participantsButton"
+                            class="control-button meeting-action"
+                            type="button"
+                            title="Show participants"
+                        >
+                            <span class="control-icon">👥</span>
+                            <span class="control-text">Participants</span>
+                            <span id="participantCount" class="toolbar-count">1</span>
+                        </button>
+                    </div>
 
                     <button
                         id="leaveMeeting"
-                        class="control-button leave-button"
+                        class="control-button leave-button meeting-action"
+                        title="Leave meeting"
                     >
-                        Leave
+                        <span class="control-icon">📞</span>
+                        <span class="control-text">Leave</span>
                     </button>
 
                 </div>
 
+                <!-- SIDE PANEL: CHAT -->
+                <aside id="chatPanel" class="meeting-side-panel hidden" aria-label="Meeting chat">
+                    <div class="side-panel-header">
+                        <div>
+                            <strong>Chat</strong>
+                            <span class="side-panel-subtitle">Meeting chat</span>
+                        </div>
+                        <button id="closeChatButton" class="side-panel-close" type="button" aria-label="Close chat">×</button>
+                    </div>
+
+                    <div id="chatMessages" class="chat-messages">
+                        <div class="chat-empty" id="chatEmptyState">
+                            <div class="chat-empty-icon">💬</div>
+                            <div>No messages yet</div>
+                            <small>Send a message to everyone in the meeting.</small>
+                        </div>
+                    </div>
+
+                    <form id="chatForm" class="chat-composer">
+                        <input
+                            id="chatInput"
+                            type="text"
+                            maxlength="500"
+                            autocomplete="off"
+                            placeholder="Type a message..."
+                            aria-label="Chat message"
+                        >
+                        <button type="submit" id="chatSendButton" aria-label="Send message">➤</button>
+                    </form>
+                </aside>
+
+                <!-- SIDE PANEL: PARTICIPANTS -->
+                <aside id="participantsPanel" class="meeting-side-panel hidden" aria-label="Participants">
+                    <div class="side-panel-header">
+                        <div>
+                            <strong>Participants</strong>
+                            <span id="participantsPanelCount" class="side-panel-subtitle">1 participant</span>
+                        </div>
+                        <button id="closeParticipantsButton" class="side-panel-close" type="button" aria-label="Close participants">×</button>
+                    </div>
+
+                    <div id="participantsList" class="participants-list"></div>
+                </aside>
             </main>
 
         </section>
