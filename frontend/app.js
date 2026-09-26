@@ -32,6 +32,7 @@
         "aircanvas-sixxay";
 
     const MAX_PARTICIPANTS = 5;
+    const MAX_GUEST_DRAWERS = 2;
 
     const PREDICTION_INTERVAL_MS = 80;
     const DRAW_SEND_INTERVAL_MS = 30;
@@ -39,11 +40,6 @@
 
     const MEDIAPIPE_PROCESS_WIDTH = 640;
     const MEDIAPIPE_PROCESS_HEIGHT = 360;
-    // ============================================================
-
-    // ============================================================
-
-    const MAX_GUEST_DRAWERS = 2;
 
     // ============================================================
     // DOM
@@ -191,6 +187,10 @@
 
     let ws = null;
 
+    // LiveKit Data is the source of truth for chat, drawing, and permissions.
+    // Render WebSocket is intentionally not used for meeting control.
+    let liveKitDataReady = false;
+
     let liveKitRoom = null;
     let liveKitConnected = false;
     let liveKitSDKPromise = null;
@@ -280,6 +280,11 @@
         new Map();
 
     const participantInfo =
+        new Map();
+
+    // Drawing history can arrive before the LiveKit remote tile exists.
+    // Keep it temporarily and replay it when the tile is created.
+    const pendingRemoteDrawingHistory =
         new Map();
 
     // ============================================================
@@ -676,14 +681,17 @@
                         tile.identity
                     );
 
-                if (
-                    entries.some(
-                        ([, info]) =>
-                            String(
-                                info.livekitIdentity || ""
-                            ) === identity
-                    )
-                ) {
+                const existingIndex = entries.findIndex(
+                    ([, info]) =>
+                        String(info.livekitIdentity || "") === identity
+                );
+
+                if (existingIndex >= 0) {
+                    const existingInfo = entries[existingIndex][1];
+                    existingInfo.livekitIdentity = identity;
+                    if (!existingInfo.name || existingInfo.name === "Participant") {
+                        existingInfo.name = tile.participant?.name || "Participant";
+                    }
                     return;
                 }
 
@@ -1669,6 +1677,11 @@
             tile
         );
 
+        requestAnimationFrame(() => {
+            resizeRemoteCanvas(tile);
+            flushPendingRemoteDrawingHistory(identity);
+        });
+
         requestAnimationFrame(
             () =>
                 resizeRemoteCanvas(
@@ -1679,6 +1692,30 @@
         updateParticipantCount();
 
         return tile;
+    }
+
+    function flushPendingRemoteDrawingHistory(identity) {
+        const key = String(identity || "");
+        if (!key || !remoteParticipants.has(key)) {
+            return;
+        }
+
+        const events = pendingRemoteDrawingHistory.get(key);
+        if (!Array.isArray(events) || !events.length) {
+            return;
+        }
+
+        pendingRemoteDrawingHistory.delete(key);
+
+        events.forEach(event => {
+            try {
+                handleRemoteDraw(event);
+            } catch (error) {
+                console.warn("⚠️ Could not replay drawing history:", error);
+            }
+        });
+
+        console.log(`🖼️ Replayed ${events.length} drawing events for ${key}`);
     }
 
     function removeRemoteTile(
@@ -1713,6 +1750,8 @@
         remoteParticipants.delete(
             key
         );
+
+        pendingRemoteDrawingHistory.delete(key);
 
         updateParticipantCount();
     }
@@ -2933,12 +2972,7 @@
         const remotePrevX =
             1 - clamp(Number(prevX), 0, 1);
 
-        if (
-            !meetingActive ||
-            !ws ||
-            ws.readyState !==
-                WebSocket.OPEN
-        ) {
+        if (!meetingActive || !liveKitConnected) {
             return;
         }
 
@@ -2957,55 +2991,20 @@
         lastDrawSendTime =
             now;
 
-        try {
-            ws.send(
-                JSON.stringify(
-                    {
-                        type:
-                            "draw_data",
-
-                        meeting_id:
-                            meetingId,
-
-                        user_id:
-                            userId,
-
-                        user_name:
-                            userName,
-
-                        livekit_identity:
-                            liveKitIdentity,
-
-                        x:
-                            remoteX,
-
-                        y:
-                            Number(y),
-
-                        prev_x:
-                            remotePrevX,
-
-                        prev_y:
-                            Number(prevY),
-
-                        lastX:
-                            remotePrevX,
-
-                        lastY:
-                            Number(prevY),
-
-                        action:
-                            action ||
-                            "draw"
-                    }
-                )
-            );
-        } catch (error) {
-            console.warn(
-                "⚠️ Draw message failed:",
-                error
-            );
-        }
+        sendWS({
+            type: "draw_data",
+            meeting_id: meetingId,
+            user_id: liveKitIdentity,
+            user_name: userName,
+            livekit_identity: liveKitIdentity,
+            x: remoteX,
+            y: Number(y),
+            prev_x: remotePrevX,
+            prev_y: Number(prevY),
+            lastX: remotePrevX,
+            lastY: Number(prevY),
+            action: action || "draw"
+        });
     }
 
     function clearMyCanvasAndBroadcast() {
@@ -3015,42 +3014,17 @@
 
         clearLocalCanvas();
 
-        if (
-            !meetingActive ||
-            !ws ||
-            ws.readyState !==
-                WebSocket.OPEN
-        ) {
+        if (!meetingActive || !liveKitConnected) {
             return;
         }
 
-        try {
-            ws.send(
-                JSON.stringify(
-                    {
-                        type:
-                            "clear_canvas",
-
-                        meeting_id:
-                            meetingId,
-
-                        user_id:
-                            userId,
-
-                        user_name:
-                            userName,
-
-                        livekit_identity:
-                            liveKitIdentity
-                    }
-                )
-            );
-        } catch (error) {
-            console.warn(
-                "⚠️ Clear message failed:",
-                error
-            );
-        }
+        sendWS({
+            type: "clear_canvas",
+            meeting_id: meetingId,
+            user_id: liveKitIdentity,
+            user_name: userName,
+            livekit_identity: liveKitIdentity
+        });
     }
 
     // ============================================================
@@ -3260,285 +3234,142 @@
     }
 
     // ============================================================
-    // WEBSOCKET
+    // LIVEKIT DATA MESSAGING
     // ============================================================
 
-    function sendWS(
-        message
-    ) {
-        if (
-            !ws ||
-            ws.readyState !==
-                WebSocket.OPEN
-        ) {
+    async function sendLiveKitData(message, options = {}) {
+        if (!liveKitRoom?.localParticipant || !liveKitConnected) {
+            console.warn("⚠️ LiveKit data channel is not ready.");
             return false;
         }
 
         try {
-            ws.send(
-                JSON.stringify(
-                    message
-                )
-            );
-
+            const payload = new TextEncoder().encode(JSON.stringify(message));
+            await liveKitRoom.localParticipant.publishData(payload, {
+                reliable: options.reliable !== false,
+                destinationIdentities: options.destinationIdentities || [],
+                topic: options.topic || "aircanvas-control"
+            });
             return true;
         } catch (error) {
-            console.error(
-                "❌ WebSocket send failed:",
-                error
-            );
-
+            console.error("❌ LiveKit data send failed:", error);
             return false;
         }
     }
 
-    function connectWebSocket() {
-        return new Promise(
-            (
-                resolve,
-                reject
-            ) => {
-                if (!meetingId) {
-                    reject(
-                        new Error(
-                            "Meeting ID is missing."
-                        )
-                    );
+    function upsertLiveKitParticipant(participant, isCreator = false) {
+        if (!participant) return;
+        const identity = String(participant.identity || "");
+        if (!identity || identity === String(liveKitIdentity)) return;
 
-                    return;
-                }
+        const existing = participantInfo.get(identity) || {
+            userId: identity,
+            name: participant.name || "Participant",
+            isCreator: false,
+            livekitIdentity: identity,
+            canvasEnabled: false
+        };
 
-                if (ws) {
-                    try {
-                        ws.close();
-                    } catch (_) {}
+        existing.userId = identity;
+        existing.name = participant.name || existing.name || "Participant";
+        existing.livekitIdentity = identity;
+        if (isCreator) existing.isCreator = true;
 
-                    ws = null;
-                }
-
-                const url =
-                    `${WS_URL}/ws/${encodeURIComponent(
-                        meetingId
-                    )}`;
-
-                console.log(
-                    "🔌 Connecting WebSocket:",
-                    url
-                );
-
-                let settled = false;
-
-                const registrationTimer =
-                    setTimeout(() => {
-                        if (!settled) {
-                            settled = true;
-
-                            reject(
-                                new Error(
-                                    "Backend registration timed out."
-                                )
-                            );
-                        }
-                    }, 10000);
-
-                ws =
-                    new WebSocket(
-                        url
-                    );
-
-                ws.onopen =
-                    () => {
-                        console.log(
-                            "✅ WebSocket connected. Registering with backend..."
-                        );
-
-                        setConnectionStatus(
-                            "Connected"
-                        );
-
-                        const sent =
-                            sendWS({
-                                type:
-                                    isMeetingCreator
-                                        ? "create_meeting"
-                                        : "join_meeting",
-
-                                meeting_id:
-                                    meetingId,
-
-                                user_id:
-                                    userId,
-
-                                user_name:
-                                    userName,
-
-                                is_creator:
-                                    isMeetingCreator,
-
-                                livekit_identity:
-                                    liveKitIdentity
-                            });
-
-                        if (!sent && !settled) {
-                            clearTimeout(
-                                registrationTimer
-                            );
-
-                            settled = true;
-
-                            reject(
-                                new Error(
-                                    "Could not send meeting registration."
-                                )
-                            );
-                        }
-                    };
-
-                ws.onmessage =
-                    event => {
-                        let data;
-
-                        try {
-                            data =
-                                JSON.parse(
-                                    event.data
-                                );
-                        } catch (_) {
-                            return;
-                        }
-
-                        // Resolve the registration promise FIRST.
-                        // handleWebSocketMessage() may update UI/MediaPipe state,
-                        // and an unrelated UI error must never make a successful
-                        // backend registration look like a timeout.
-                        if (
-                            data.type === "self_info" &&
-                            !settled
-                        ) {
-                            clearTimeout(
-                                registrationTimer
-                            );
-
-                            settled = true;
-
-                            console.log(
-                                `✅ Backend registration confirmed | ` +
-                                `role=${data.is_creator ? "HOST" : "PARTICIPANT"} | ` +
-                                `name=${data.user_name || userName}`
-                            );
-
-                            resolve();
-                        }
-
-                        try {
-                            handleWebSocketMessage(
-                                data
-                            );
-                        } catch (handlerError) {
-                            console.error(
-                                "❌ WebSocket message handler error:",
-                                handlerError,
-                                data
-                            );
-                        }
-
-                        if (
-                            data.type === "error" &&
-                            !settled
-                        ) {
-                            clearTimeout(
-                                registrationTimer
-                            );
-
-                            settled = true;
-
-                            reject(
-                                new Error(
-                                    data.message ||
-                                    "Backend registration failed."
-                                )
-                            );
-                        }
-
-                        if (
-                            data.type === "room_full" &&
-                            !settled
-                        ) {
-                            clearTimeout(
-                                registrationTimer
-                            );
-
-                            settled = true;
-
-                            reject(
-                                new Error(
-                                    data.message ||
-                                    "Meeting is full."
-                                )
-                            );
-                        }
-                    };
-
-                ws.onerror =
-                    error => {
-                        console.error(
-                            "❌ WebSocket error:",
-                            error
-                        );
-
-                        setConnectionStatus(
-                            "Error"
-                        );
-
-                        if (!settled) {
-                            clearTimeout(
-                                registrationTimer
-                            );
-
-                            settled = true;
-
-                            reject(
-                                new Error(
-                                    "WebSocket connection failed."
-                                )
-                            );
-                        }
-                    };
-
-                ws.onclose =
-                    () => {
-                        console.log(
-                            "🔌 WebSocket disconnected."
-                        );
-
-                        if (
-                            meetingActive
-                        ) {
-                            setConnectionStatus(
-                                "Disconnected"
-                            );
-                        }
-
-                        if (!settled) {
-                            clearTimeout(
-                                registrationTimer
-                            );
-
-                            settled = true;
-
-                            reject(
-                                new Error(
-                                    "WebSocket closed before backend registration."
-                                )
-                            );
-                        }
-
-                        ws = null;
-                    };
-            }
-        );
+        participantInfo.set(identity, existing);
+        userIdToLiveKitIdentity.set(identity, identity);
+        liveKitIdentityToUserId.set(identity, identity);
+        updateParticipantCount();
+        renderDrawingPermissions();
     }
 
+    function handleLiveKitData(payload, participant) {
+        try {
+            const decoded = new TextDecoder().decode(payload);
+            const data = JSON.parse(decoded);
+            const senderIdentity = participant?.identity ? String(participant.identity) : "";
+
+            if (data.type === "participant_hello") {
+                if (!senderIdentity) return;
+
+                const info = participantInfo.get(senderIdentity) || {
+                    userId: senderIdentity,
+                    name: data.user_name || participant?.name || "Participant",
+                    isCreator: Boolean(data.is_creator),
+                    livekitIdentity: senderIdentity,
+                    canvasEnabled: Boolean(data.canvas_enabled)
+                };
+
+                info.userId = senderIdentity;
+                info.name = data.user_name || info.name || participant?.name || "Participant";
+                info.isCreator = Boolean(data.is_creator);
+                info.livekitIdentity = senderIdentity;
+                info.canvasEnabled = Boolean(data.canvas_enabled);
+                participantInfo.set(senderIdentity, info);
+                userIdToLiveKitIdentity.set(senderIdentity, senderIdentity);
+                liveKitIdentityToUserId.set(senderIdentity, senderIdentity);
+
+                updateParticipantCount();
+                renderDrawingPermissions();
+                return;
+            }
+
+            // The existing message handler already knows how to render chat,
+            // drawing, permission and clear events. Give it the LiveKit sender identity.
+            if (senderIdentity) {
+                data.user_id = data.user_id || senderIdentity;
+                data.livekit_identity = data.livekit_identity || senderIdentity;
+                data.user_name = data.user_name || participant?.name || "Participant";
+            }
+
+            handleWebSocketMessage(data);
+        } catch (error) {
+            console.error("❌ LiveKit data receive failed:", error);
+        }
+    }
+
+    // ============================================================
+    // WEBSOCKET COMPATIBILITY LAYER
+    // ============================================================
+
+    // Kept so the rest of the existing app does not need to be rewritten.
+    // Meeting control messages are now carried by LiveKit Data instead.
+    function sendWS(message) {
+        if (!message) return false;
+
+        const type = message.type;
+        if (type === "create_meeting" || type === "join_meeting") {
+            return true;
+        }
+
+        let destinationIdentities = [];
+        if (type === "grant_drawing" || type === "revoke_drawing") {
+            if (message.target_user_id) {
+                destinationIdentities = [String(message.target_user_id)];
+            }
+        }
+
+        const reliable = type !== "draw_data";
+        sendLiveKitData(
+            message,
+            {
+                reliable,
+                destinationIdentities,
+                topic: type === "draw_data" ? "aircanvas-draw" : "aircanvas-control"
+            }
+        );
+
+        if (type !== "draw_data") {
+            console.log("📤 LiveKit Data:", message);
+        }
+        return true;
+    }
+
+    function connectWebSocket() {
+        // Intentionally disabled: LiveKit is now responsible for all
+        // real-time meeting signaling. Render is only used for /predict.
+        setConnectionStatus("LiveKit");
+        return Promise.resolve(true);
+    }
 
     function handleWebSocketMessage(
         data
@@ -3836,7 +3667,7 @@
                     drawingPermissionRequests.delete(id);
                 }
 
-                if (id === String(userId)) {
+                if (id === String(userId) || id === String(liveKitIdentity)) {
                     drawingPermissionRequested = false;
                     drawingPermissionStatus = "";
                     canvasEnabled =
@@ -3926,6 +3757,32 @@
                 break;
             }
 
+            case "drawing_history": {
+                const events = Array.isArray(data.events)
+                    ? data.events
+                    : [];
+
+                events.forEach(event => {
+                    const identity = resolveRemoteIdentity(event);
+
+                    if (!identity || identity === liveKitIdentity) {
+                        return;
+                    }
+
+                    if (remoteParticipants.has(identity)) {
+                        handleRemoteDraw(event);
+                    } else {
+                        if (!pendingRemoteDrawingHistory.has(identity)) {
+                            pendingRemoteDrawingHistory.set(identity, []);
+                        }
+                        pendingRemoteDrawingHistory.get(identity).push(event);
+                    }
+                });
+
+                console.log(`🖼️ Drawing history received: ${events.length} events`);
+                break;
+            }
+
             case "chat_message":
                 appendChatMessage(data);
                 break;
@@ -3970,14 +3827,9 @@
     }
 
     function disconnectWebSocket() {
-        if (!ws) {
-            return;
+        if (ws) {
+            try { ws.close(); } catch (_) {}
         }
-
-        try {
-            ws.close();
-        } catch (_) {}
-
         ws = null;
     }
 
@@ -4147,6 +3999,17 @@
             );
 
         // ========================================================
+        // LIVEKIT DATA CHANNEL
+        // ========================================================
+
+        liveKitRoom.on(
+            LK.RoomEvent.DataReceived,
+            (payload, participant) => {
+                handleLiveKitData(payload, participant);
+            }
+        );
+
+        // ========================================================
         // REMOTE TRACK SUBSCRIBED
         // ========================================================
 
@@ -4245,6 +4108,17 @@
                     participant
                 );
 
+                upsertLiveKitParticipant(participant, false);
+
+                // Ask the room to exchange app-level identity/role information.
+                // This removes the dependency on Render WebSocket room state.
+                sendLiveKitData({
+                    type: "participant_hello",
+                    user_name: userName,
+                    is_creator: isMeetingCreator,
+                    canvas_enabled: Boolean(isMeetingCreator || canvasEnabled)
+                }, { reliable: true, topic: "aircanvas-control" });
+
                 // Match LiveKit identity using the identity supplied by the backend.
                 // Never match participants by name because names are not unique.
                 for (
@@ -4324,6 +4198,22 @@
             "✅ LIVEKIT CONNECTED:",
             liveKitIdentity
         );
+
+        liveKitDataReady = true;
+
+        participantInfo.clear();
+        liveKitRoom.remoteParticipants.forEach(participant => {
+            createRemoteTile(participant);
+            upsertLiveKitParticipant(participant, false);
+        });
+
+        // Tell existing participants who this client is.
+        await sendLiveKitData({
+            type: "participant_hello",
+            user_name: userName,
+            is_creator: isMeetingCreator,
+            canvas_enabled: Boolean(isMeetingCreator || canvasEnabled)
+        }, { reliable: true, topic: "aircanvas-control" });
 
         // ========================================================
         // PUBLISH CAMERA
@@ -4771,6 +4661,7 @@
             false;
 
         disconnectLiveKit();
+        liveKitDataReady = false;
 
         disconnectWebSocket();
 
