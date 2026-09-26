@@ -2,7 +2,6 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, List, Any, Optional
-import json
 import os
 import uuid
 import joblib
@@ -14,6 +13,7 @@ import numpy as np
 # ============================================================
 
 app = FastAPI()
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,11 +39,15 @@ MODEL_PATHS = [
 gesture_model = None
 loaded_model_path = None
 
+
 for model_path in MODEL_PATHS:
+
     model_path = os.path.abspath(model_path)
 
     if os.path.exists(model_path):
+
         try:
+
             gesture_model = joblib.load(model_path)
             loaded_model_path = model_path
 
@@ -52,13 +56,17 @@ for model_path in MODEL_PATHS:
             print(f"📁 Model path: {model_path}")
 
             if hasattr(gesture_model, "classes_"):
-                print(f"🧠 Model classes: {gesture_model.classes_}")
+                print(
+                    f"🧠 Model classes: "
+                    f"{gesture_model.classes_}"
+                )
 
             print("=" * 60)
 
             break
 
         except Exception as error:
+
             print("=" * 60)
             print("❌ MODEL LOAD ERROR")
             print(f"📁 Path: {model_path}")
@@ -67,11 +75,20 @@ for model_path in MODEL_PATHS:
 
 
 if gesture_model is None:
+
     print("=" * 60)
     print("❌ WARNING: gesture_knn.joblib NOT FOUND")
-    print("The /predict endpoint cannot use the trained model.")
-    print("Check that the model exists in:")
-    print("air-canvas-video-meeting/models/gesture_knn.joblib")
+    print(
+        "The /predict endpoint cannot use "
+        "the trained model."
+    )
+    print(
+        "Check that the model exists in:"
+    )
+    print(
+        "air-canvas-video-meeting/"
+        "models/gesture_knn.joblib"
+    )
     print("=" * 60)
 
 
@@ -80,6 +97,7 @@ if gesture_model is None:
 # ============================================================
 
 class LandmarksInput(BaseModel):
+
     landmarks: List[float]
 
 
@@ -90,7 +108,12 @@ class LandmarksInput(BaseModel):
 class ConnectionManager:
 
     def __init__(self):
-        self.rooms: Dict[str, List[Dict[str, Any]]] = {}
+
+        self.rooms: Dict[
+            str,
+            List[Dict[str, Any]]
+        ] = {}
+
 
     async def connect(
         self,
@@ -100,19 +123,33 @@ class ConnectionManager:
         user_name: str,
         is_creator: bool
     ):
-        await websocket.accept()
+
+        # IMPORTANT:
+        # WebSocket is accepted in websocket_endpoint()
+        # BEFORE this function is called.
 
         if room_id not in self.rooms:
+
             self.rooms[room_id] = []
 
+
         connection = {
+
             "websocket": websocket,
+
             "user_id": user_id,
+
             "user_name": user_name,
+
             "is_creator": is_creator
+
         }
 
-        self.rooms[room_id].append(connection)
+
+        self.rooms[room_id].append(
+            connection
+        )
+
 
         print(
             f"✅ CONNECTED | "
@@ -122,6 +159,7 @@ class ConnectionManager:
             f"Creator={is_creator}"
         )
 
+
     def disconnect(
         self,
         room_id: str,
@@ -129,46 +167,83 @@ class ConnectionManager:
     ):
 
         if room_id not in self.rooms:
+
             return
 
+
         self.rooms[room_id] = [
+
             connection
-            for connection in self.rooms[room_id]
-            if connection["websocket"] != websocket
+
+            for connection
+            in self.rooms[room_id]
+
+            if connection["websocket"]
+            != websocket
+
         ]
 
+
         if not self.rooms[room_id]:
+
             del self.rooms[room_id]
 
+
         print(
-            f"👋 Disconnected from room: {room_id}"
+            f"👋 Disconnected from room: "
+            f"{room_id}"
         )
 
-    def get_connections(self, room_id: str):
 
-        return self.rooms.get(room_id, [])
+    def get_connections(
+        self,
+        room_id: str
+    ):
+
+        return self.rooms.get(
+            room_id,
+            []
+        )
+
 
     def get_connection(
         self,
         room_id: str,
         user_id: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[
+        Dict[str, Any]
+    ]:
 
-        for connection in self.rooms.get(room_id, []):
+        for connection in self.rooms.get(
+            room_id,
+            []
+        ):
 
             if connection["user_id"] == user_id:
+
                 return connection
+
 
         return None
 
-    def get_creator(self, room_id: str):
 
-        for connection in self.rooms.get(room_id, []):
+    def get_creator(
+        self,
+        room_id: str
+    ):
+
+        for connection in self.rooms.get(
+            room_id,
+            []
+        ):
 
             if connection["is_creator"]:
+
                 return connection
 
+
         return None
+
 
     async def send_to_user(
         self,
@@ -182,30 +257,37 @@ class ConnectionManager:
             user_id
         )
 
+
         if connection is None:
+
             return False
+
 
         try:
 
-            await connection["websocket"].send_json(
-                message
-            )
+            await connection[
+                "websocket"
+            ].send_json(message)
 
             return True
+
 
         except Exception as error:
 
             print(
-                f"❌ Error sending to user: {error}"
+                f"❌ Error sending to user: "
+                f"{error}"
             )
 
             return False
+
 
     async def broadcast(
         self,
         room_id: str,
         message: dict,
-        exclude_websocket: Optional[WebSocket] = None
+        exclude_websocket:
+            Optional[WebSocket] = None
     ):
 
         connections = self.rooms.get(
@@ -213,12 +295,18 @@ class ConnectionManager:
             []
         )
 
+
         for connection in connections:
 
-            websocket = connection["websocket"]
+            websocket = connection[
+                "websocket"
+            ]
+
 
             if websocket == exclude_websocket:
+
                 continue
+
 
             try:
 
@@ -226,11 +314,13 @@ class ConnectionManager:
                     message
                 )
 
+
             except Exception as error:
 
                 print(
                     f"❌ Broadcast error for "
-                    f"{connection['user_name']}: {error}"
+                    f"{connection['user_name']}: "
+                    f"{error}"
                 )
 
 
@@ -246,21 +336,39 @@ async def root():
 
     classes = []
 
+
     if (
         gesture_model is not None
-        and hasattr(gesture_model, "classes_")
+        and hasattr(
+            gesture_model,
+            "classes_"
+        )
     ):
 
         classes = [
+
             str(item)
-            for item in gesture_model.classes_
+
+            for item
+            in gesture_model.classes_
+
         ]
 
+
     return {
-        "message": "Air Canvas Backend Running",
-        "model_loaded": gesture_model is not None,
-        "model_path": loaded_model_path,
-        "classes": classes
+
+        "message":
+            "Air Canvas Backend Running",
+
+        "model_loaded":
+            gesture_model is not None,
+
+        "model_path":
+            loaded_model_path,
+
+        "classes":
+            classes
+
     }
 
 
@@ -272,8 +380,12 @@ async def root():
 async def health():
 
     return {
+
         "status": "healthy",
-        "model_loaded": gesture_model is not None
+
+        "model_loaded":
+            gesture_model is not None
+
     }
 
 
@@ -289,36 +401,63 @@ async def predict_gesture(
     if gesture_model is None:
 
         return {
-            "raw_gesture": "no_gesture",
-            "confirmed_gesture": "no_gesture",
-            "confidence": 0.0,
-            "error": "gesture_knn.joblib not loaded"
+
+            "raw_gesture":
+                "no_gesture",
+
+            "confirmed_gesture":
+                "no_gesture",
+
+            "confidence":
+                0.0,
+
+            "error":
+                "gesture_knn.joblib not loaded"
+
         }
+
 
     if len(data.landmarks) < 42:
 
         return {
-            "raw_gesture": "no_gesture",
-            "confirmed_gesture": "no_gesture",
-            "confidence": 0.0
+
+            "raw_gesture":
+                "no_gesture",
+
+            "confirmed_gesture":
+                "no_gesture",
+
+            "confidence":
+                0.0
+
         }
+
 
     try:
 
         features = np.array(
             data.landmarks,
             dtype=np.float32
-        ).reshape(1, -1)
-
-        prediction = gesture_model.predict(
-            features
+        ).reshape(
+            1,
+            -1
         )
+
+
+        prediction = (
+            gesture_model.predict(
+                features
+            )
+        )
+
 
         predicted_class = str(
             prediction[0]
         ).strip().lower()
 
+
         confidence = 0.0
+
 
         if hasattr(
             gesture_model,
@@ -326,35 +465,67 @@ async def predict_gesture(
         ):
 
             probabilities = (
-                gesture_model.predict_proba(
+                gesture_model
+                .predict_proba(
                     features
                 )[0]
             )
 
+
             confidence = float(
-                np.max(probabilities)
+                np.max(
+                    probabilities
+                )
             )
 
+
         gesture_aliases = {
-            "none": "no_gesture",
-            "no gesture": "no_gesture",
-            "no_gesture": "no_gesture",
-            "nogesture": "no_gesture",
-            "draw": "draw",
-            "erase": "erase",
-            "clear": "clear"
+
+            "none":
+                "no_gesture",
+
+            "no gesture":
+                "no_gesture",
+
+            "no_gesture":
+                "no_gesture",
+
+            "nogesture":
+                "no_gesture",
+
+            "draw":
+                "draw",
+
+            "erase":
+                "erase",
+
+            "clear":
+                "clear"
+
         }
 
-        confirmed_gesture = gesture_aliases.get(
-            predicted_class,
-            predicted_class
+
+        confirmed_gesture = (
+            gesture_aliases.get(
+                predicted_class,
+                predicted_class
+            )
         )
 
+
         result = {
-            "raw_gesture": predicted_class,
-            "confirmed_gesture": confirmed_gesture,
-            "confidence": confidence
+
+            "raw_gesture":
+                predicted_class,
+
+            "confirmed_gesture":
+                confirmed_gesture,
+
+            "confidence":
+                confidence
+
         }
+
 
         print(
             f"🖐️ Gesture: "
@@ -362,19 +533,32 @@ async def predict_gesture(
             f"({confidence * 100:.1f}%)"
         )
 
+
         return result
+
 
     except Exception as error:
 
         print(
-            f"❌ Prediction error: {error}"
+            f"❌ Prediction error: "
+            f"{error}"
         )
 
+
         return {
-            "raw_gesture": "no_gesture",
-            "confirmed_gesture": "no_gesture",
-            "confidence": 0.0,
-            "error": str(error)
+
+            "raw_gesture":
+                "no_gesture",
+
+            "confirmed_gesture":
+                "no_gesture",
+
+            "confidence":
+                0.0,
+
+            "error":
+                str(error)
+
         }
 
 
@@ -382,7 +566,9 @@ async def predict_gesture(
 # WEBSOCKET
 # ============================================================
 
-@app.websocket("/ws/{room_id}")
+@app.websocket(
+    "/ws/{room_id}"
+)
 async def websocket_endpoint(
     websocket: WebSocket,
     room_id: str
@@ -393,9 +579,24 @@ async def websocket_endpoint(
     )[:8]
 
     user_name = "User"
+
     is_creator = False
 
+
     try:
+
+        # ====================================================
+        # IMPORTANT:
+        # ACCEPT THE WEBSOCKET FIRST
+        # ====================================================
+
+        await websocket.accept()
+
+        print(
+            f"🔌 WebSocket accepted | "
+            f"Room={room_id}"
+        )
+
 
         # ====================================================
         # RECEIVE FIRST MESSAGE
@@ -403,12 +604,18 @@ async def websocket_endpoint(
 
         try:
 
-            first_message = await websocket.receive_json()
-
-            message_type = first_message.get(
-                "type",
-                "join_meeting"
+            first_message = (
+                await websocket.receive_json()
             )
+
+
+            message_type = (
+                first_message.get(
+                    "type",
+                    "join_meeting"
+                )
+            )
+
 
             user_name = (
                 first_message.get(
@@ -417,10 +624,54 @@ async def websocket_endpoint(
                 or "User"
             ).strip()
 
-        except Exception:
 
-            message_type = "join_meeting"
-            user_name = "User"
+            # If the frontend sends user_id,
+            # preserve it.
+
+            incoming_user_id = (
+                first_message.get(
+                    "user_id"
+                )
+            )
+
+            if incoming_user_id:
+
+                user_id = str(
+                    incoming_user_id
+                )
+
+
+            print(
+                f"📩 Registration received | "
+                f"Room={room_id} | "
+                f"Type={message_type} | "
+                f"Name={user_name} | "
+                f"ID={user_id}"
+            )
+
+
+        except Exception as error:
+
+            print(
+                f"❌ Failed to receive "
+                f"registration: {error}"
+            )
+
+
+            await websocket.send_json({
+
+                "type": "error",
+
+                "message":
+                    "Invalid meeting registration."
+
+            })
+
+
+            await websocket.close()
+
+            return
+
 
         # ====================================================
         # DETERMINE HOST / PARTICIPANT
@@ -430,22 +681,28 @@ async def websocket_endpoint(
 
             is_creator = True
 
+
         elif message_type == "join_meeting":
 
             is_creator = False
 
+
         else:
 
-            await websocket.accept()
-
             await websocket.send_json({
+
                 "type": "error",
-                "message": "Invalid first WebSocket message."
+
+                "message":
+                    "Invalid first WebSocket message."
+
             })
+
 
             await websocket.close()
 
             return
+
 
         # ====================================================
         # ROOM LIMIT
@@ -457,18 +714,27 @@ async def websocket_endpoint(
             )
         )
 
-        if len(current_connections) >= 5:
 
-            await websocket.accept()
+        if len(
+            current_connections
+        ) >= 5:
 
             await websocket.send_json({
-                "type": "room_full",
-                "message": "Meeting already has five participants."
+
+                "type":
+                    "room_full",
+
+                "message":
+                    "Meeting already has "
+                    "five participants."
+
             })
+
 
             await websocket.close()
 
             return
+
 
         # ====================================================
         # PREVENT SECOND HOST
@@ -482,41 +748,73 @@ async def websocket_endpoint(
                 )
             )
 
+
             if existing_creator is not None:
 
-                await websocket.accept()
-
                 await websocket.send_json({
-                    "type": "error",
-                    "message": "Meeting already has a host."
+
+                    "type":
+                        "error",
+
+                    "message":
+                        "Meeting already has "
+                        "a host."
+
                 })
+
 
                 await websocket.close()
 
                 return
+
 
         # ====================================================
         # REGISTER CONNECTION
         # ====================================================
 
         await manager.connect(
+
             room_id=room_id,
+
             websocket=websocket,
+
             user_id=user_id,
+
             user_name=user_name,
+
             is_creator=is_creator
+
         )
+
 
         # ====================================================
         # SEND SELF INFO
         # ====================================================
 
         await websocket.send_json({
-            "type": "self_info",
-            "user_id": user_id,
-            "user_name": user_name,
-            "is_creator": is_creator
+
+            "type":
+                "self_info",
+
+            "user_id":
+                user_id,
+
+            "user_name":
+                user_name,
+
+            "is_creator":
+                is_creator
+
         })
+
+
+        print(
+            f"✅ REGISTRATION COMPLETE | "
+            f"Room={room_id} | "
+            f"Name={user_name} | "
+            f"Creator={is_creator}"
+        )
+
 
         # ====================================================
         # HOST CREATED MEETING
@@ -526,8 +824,10 @@ async def websocket_endpoint(
 
             print(
                 f"👑 HOST CREATED | "
-                f"{user_name} | Room={room_id}"
+                f"{user_name} | "
+                f"Room={room_id}"
             )
+
 
         # ====================================================
         # PARTICIPANT JOINED
@@ -537,27 +837,46 @@ async def websocket_endpoint(
 
             print(
                 f"👤 PARTICIPANT JOINED | "
-                f"{user_name} | Room={room_id}"
+                f"{user_name} | "
+                f"Room={room_id}"
             )
 
-            creator = manager.get_creator(
-                room_id
+
+            creator = (
+                manager.get_creator(
+                    room_id
+                )
             )
+
 
             # ------------------------------------------------
             # TELL HOST PARTICIPANT JOINED
             # ------------------------------------------------
 
             await manager.broadcast(
+
                 room_id,
+
                 {
-                    "type": "participant_joined",
-                    "user_id": user_id,
-                    "user_name": user_name,
-                    "is_creator": False
+
+                    "type":
+                        "participant_joined",
+
+                    "user_id":
+                        user_id,
+
+                    "user_name":
+                        user_name,
+
+                    "is_creator":
+                        False
+
                 },
+
                 exclude_websocket=websocket
+
             )
+
 
             # ------------------------------------------------
             # TELL PARTICIPANT WHO HOST IS
@@ -566,21 +885,39 @@ async def websocket_endpoint(
             if creator:
 
                 await websocket.send_json({
-                    "type": "creator_info",
-                    "creator_id": creator["user_id"],
-                    "creator_name": creator["user_name"]
+
+                    "type":
+                        "creator_info",
+
+                    "creator_id":
+                        creator["user_id"],
+
+                    "creator_name":
+                        creator["user_name"]
+
                 })
+
 
                 # ------------------------------------------------
                 # ALSO SEND COMPLETE HOST INFO
                 # ------------------------------------------------
 
                 await websocket.send_json({
-                    "type": "participant_joined",
-                    "user_id": creator["user_id"],
-                    "user_name": creator["user_name"],
-                    "is_creator": True
+
+                    "type":
+                        "participant_joined",
+
+                    "user_id":
+                        creator["user_id"],
+
+                    "user_name":
+                        creator["user_name"],
+
+                    "is_creator":
+                        True
+
                 })
+
 
         # ====================================================
         # MESSAGE LOOP
@@ -588,9 +925,15 @@ async def websocket_endpoint(
 
         while True:
 
-            data = await websocket.receive_json()
+            data = (
+                await websocket.receive_json()
+            )
 
-            msg_type = data.get("type")
+
+            msg_type = data.get(
+                "type"
+            )
+
 
             # =================================================
             # WEBRTC OFFER
@@ -600,19 +943,37 @@ async def websocket_endpoint(
 
                 print(
                     f"📤 OFFER | "
-                    f"{user_name} -> room {room_id}"
+                    f"{user_name} -> "
+                    f"room {room_id}"
                 )
 
+
                 await manager.broadcast(
+
                     room_id,
+
                     {
-                        "type": "offer",
-                        "offer": data.get("offer"),
-                        "from": user_id,
-                        "from_name": user_name
+
+                        "type":
+                            "offer",
+
+                        "offer":
+                            data.get(
+                                "offer"
+                            ),
+
+                        "from":
+                            user_id,
+
+                        "from_name":
+                            user_name
+
                     },
+
                     exclude_websocket=websocket
+
                 )
+
 
             # =================================================
             # WEBRTC ANSWER
@@ -622,47 +983,83 @@ async def websocket_endpoint(
 
                 print(
                     f"📤 ANSWER | "
-                    f"{user_name} -> room {room_id}"
+                    f"{user_name} -> "
+                    f"room {room_id}"
                 )
 
+
                 await manager.broadcast(
+
                     room_id,
+
                     {
-                        "type": "answer",
-                        "answer": data.get("answer"),
-                        "from": user_id,
-                        "from_name": user_name
+
+                        "type":
+                            "answer",
+
+                        "answer":
+                            data.get(
+                                "answer"
+                            ),
+
+                        "from":
+                            user_id,
+
+                        "from_name":
+                            user_name
+
                     },
+
                     exclude_websocket=websocket
+
                 )
+
 
             # =================================================
             # ICE CANDIDATE
             # =================================================
-            # Accept both names just in case frontend version
-            # uses either spelling.
-            # =================================================
 
             elif msg_type in [
+
                 "ice-candidate",
+
                 "ice_candidate"
+
             ]:
 
                 print(
                     f"🧊 ICE | "
-                    f"{user_name} -> room {room_id}"
+                    f"{user_name} -> "
+                    f"room {room_id}"
                 )
 
+
                 await manager.broadcast(
+
                     room_id,
+
                     {
-                        "type": "ice-candidate",
-                        "candidate": data.get("candidate"),
-                        "from": user_id,
-                        "from_name": user_name
+
+                        "type":
+                            "ice-candidate",
+
+                        "candidate":
+                            data.get(
+                                "candidate"
+                            ),
+
+                        "from":
+                            user_id,
+
+                        "from_name":
+                            user_name
+
                     },
+
                     exclude_websocket=websocket
+
                 )
+
 
             # =================================================
             # DRAW DATA
@@ -675,44 +1072,69 @@ async def websocket_endpoint(
                     "draw"
                 )
 
+
                 draw_message = {
-                    "type": "draw_data",
 
-                    "user_id": user_id,
-                    "user_name": user_name,
+                    "type":
+                        "draw_data",
 
-                    "action": action,
+                    "user_id":
+                        user_id,
 
-                    "x": data.get(
-                        "x",
-                        0
-                    ),
+                    "user_name":
+                        user_name,
 
-                    "y": data.get(
-                        "y",
-                        0
-                    ),
+                    "action":
+                        action,
 
-                    "lastX": data.get(
-                        "lastX",
-                        0
-                    ),
+                    "x":
+                        data.get(
+                            "x",
+                            0
+                        ),
 
-                    "lastY": data.get(
-                        "lastY",
-                        0
-                    ),
+                    "y":
+                        data.get(
+                            "y",
+                            0
+                        ),
 
-                    "color": data.get(
-                        "color",
-                        "#00ff00"
-                    ),
+                    "lastX":
+                        data.get(
+                            "lastX",
+                            0
+                        ),
 
-                    "lineWidth": data.get(
-                        "lineWidth",
-                        3
-                    )
+                    "lastY":
+                        data.get(
+                            "lastY",
+                            0
+                        ),
+
+                    "prev_x":
+                        data.get(
+                            "prev_x"
+                        ),
+
+                    "prev_y":
+                        data.get(
+                            "prev_y"
+                        ),
+
+                    "color":
+                        data.get(
+                            "color",
+                            "#00ff00"
+                        ),
+
+                    "lineWidth":
+                        data.get(
+                            "lineWidth",
+                            3
+                        )
+
                 }
+
 
                 print(
                     f"🎨 DRAW DATA | "
@@ -722,13 +1144,20 @@ async def websocket_endpoint(
                     f"y={draw_message['y']}"
                 )
 
-                # SEND DRAWING ONLY TO OTHER USER
+
+                # SEND DRAWING ONLY
+                # TO OTHER USERS
 
                 await manager.broadcast(
+
                     room_id,
+
                     draw_message,
+
                     exclude_websocket=websocket
+
                 )
+
 
             # =================================================
             # CLEAR CANVAS
@@ -742,15 +1171,28 @@ async def websocket_endpoint(
                     f"Room={room_id}"
                 )
 
+
                 await manager.broadcast(
+
                     room_id,
+
                     {
-                        "type": "clear_canvas",
-                        "user_id": user_id,
-                        "user_name": user_name
+
+                        "type":
+                            "clear_canvas",
+
+                        "user_id":
+                            user_id,
+
+                        "user_name":
+                            user_name
+
                     },
+
                     exclude_websocket=websocket
+
                 )
+
 
             # =================================================
             # LEAVE
@@ -764,22 +1206,40 @@ async def websocket_endpoint(
                     f"Room={room_id}"
                 )
 
+
                 await manager.broadcast(
+
                     room_id,
+
                     {
-                        "type": "participant_left",
-                        "user_id": user_id,
-                        "user_name": user_name
+
+                        "type":
+                            "participant_left",
+
+                        "user_id":
+                            user_id,
+
+                        "user_name":
+                            user_name
+
                     },
+
                     exclude_websocket=websocket
+
                 )
+
 
                 manager.disconnect(
+
                     room_id,
+
                     websocket
+
                 )
 
+
                 break
+
 
             # =================================================
             # UNKNOWN MESSAGE
@@ -792,6 +1252,7 @@ async def websocket_endpoint(
                     f"{msg_type}"
                 )
 
+
     except WebSocketDisconnect:
 
         print(
@@ -800,20 +1261,37 @@ async def websocket_endpoint(
             f"Room={room_id}"
         )
 
+
         manager.disconnect(
+
             room_id,
+
             websocket
+
         )
 
+
         await manager.broadcast(
+
             room_id,
+
             {
-                "type": "participant_left",
-                "user_id": user_id,
-                "user_name": user_name
+
+                "type":
+                    "participant_left",
+
+                "user_id":
+                    user_id,
+
+                "user_name":
+                    user_name
+
             },
+
             exclude_websocket=websocket
+
         )
+
 
     except Exception as error:
 
@@ -823,19 +1301,35 @@ async def websocket_endpoint(
             f"{error}"
         )
 
+
         manager.disconnect(
+
             room_id,
+
             websocket
+
         )
 
+
         await manager.broadcast(
+
             room_id,
+
             {
-                "type": "participant_left",
-                "user_id": user_id,
-                "user_name": user_name
+
+                "type":
+                    "participant_left",
+
+                "user_id":
+                    user_id,
+
+                "user_name":
+                    user_name
+
             },
+
             exclude_websocket=websocket
+
         )
 
 
@@ -847,15 +1341,31 @@ if __name__ == "__main__":
 
     import uvicorn
 
-    print("=" * 60)
-    print("🚀 AIR CANVAS BACKEND")
-    print("🌐 http://localhost:8000")
-    print("🔌 WebSocket: ws://localhost:8000/ws/{room_id}")
+
     print("=" * 60)
 
+    print("🚀 AIR CANVAS BACKEND")
+
+    print(
+        "🌐 http://localhost:8000"
+    )
+
+    print(
+        "🔌 WebSocket: "
+        "ws://localhost:8000/ws/{room_id}"
+    )
+
+    print("=" * 60)
+
+
     uvicorn.run(
+
         app,
+
         host="127.0.0.1",
+
         port=8000,
+
         reload=False
+
     )
