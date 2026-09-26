@@ -2,6 +2,11 @@
 // AIR CANVAS - VIDEO MEETING
 // COMPLETE CLEAN APP.JS
 // ============================================================
+// LiveKit handles video/audio (WebRTC internally).
+// FastAPI WebSocket handles all application state:
+//   registration, participant list, drawing permission,
+//   grant/revoke, chat, drawing sync, clear.
+// ============================================================
 
 "use strict";
 
@@ -53,6 +58,7 @@ const remoteParticipantLabel = document.getElementById("remoteParticipantLabel")
 const waitingParticipant = document.getElementById("waitingParticipant");
 const video = document.getElementById("video");
 const remoteVideo = document.getElementById("remoteVideo");
+const remoteCanvas = document.getElementById("remoteCanvas");
 const remoteAudio = document.getElementById("remoteAudio");
 const airCanvas = document.getElementById("airCanvas");
 const landmarkCanvas = document.getElementById("landmarkCanvas");
@@ -89,9 +95,10 @@ let chatUnreadCount = 0;
 // ============================================================
 
 let localStream = null;
+
+// PATCH 1: WebSocket + connection flag
 let ws = null;
 let wsConnected = false;
-let wsReconnectTimer = null;
 
 let liveKitRoom = null;
 let liveKitConnected = false;
@@ -137,6 +144,11 @@ let pendingLandmarks = null;
 let lastPredictionTime = 0;
 let lastClearTime = 0;
 
+// PATCH 2: Clear-gesture confirmation buffer.
+let clearGestureBuffer = [];
+const CLEAR_HISTORY_SIZE = 5;
+const CLEAR_CONFIRM_FRAMES = 4;
+
 // ============================================================
 // DRAWING STATE
 // ============================================================
@@ -160,17 +172,24 @@ const pendingRemoteDrawingHistory = new Map();
 const remoteLastDrawPoint = new Map();
 
 // ============================================================
-// HELPERS
+// BASIC HELPERS
 // ============================================================
 
 function generateUserId() {
-    return "user-" + Date.now().toString(36) + "-" + Math.random().toString(36).substring(2, 8);
+    return (
+        "user-" +
+        Date.now().toString(36) +
+        "-" +
+        Math.random().toString(36).substring(2, 8)
+    );
 }
 
 function generateMeetingId() {
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     let result = "";
-    for (let i = 0; i < 6; i++) result += chars[Math.floor(Math.random() * chars.length)];
+    for (let i = 0; i < 6; i++) {
+        result += chars[Math.floor(Math.random() * chars.length)];
+    }
     return result;
 }
 
@@ -190,7 +209,8 @@ function updateParticipantCount() {
     const count = 1 + remoteParticipants.size;
     if (participantCount) participantCount.textContent = String(count);
     if (participantsPanelCount) {
-        participantsPanelCount.textContent = `${count} participant${count === 1 ? "" : "s"}`;
+        participantsPanelCount.textContent =
+            `${count} participant${count === 1 ? "" : "s"}`;
     }
     renderParticipantsList();
 }
@@ -198,7 +218,11 @@ function updateParticipantCount() {
 function getInitials(name) {
     const value = String(name || "Participant").trim();
     if (!value) return "P";
-    return value.split(/\s+/).slice(0, 2).map((p) => p.charAt(0).toUpperCase()).join("") || "P";
+    return value
+        .split(/\s+/)
+        .slice(0, 2)
+        .map((part) => part.charAt(0).toUpperCase())
+        .join("") || "P";
 }
 
 function formatChatTime(value) {
@@ -213,10 +237,6 @@ function setChatUnreadCount(count) {
     chatUnreadBadge.textContent = String(chatUnreadCount);
     chatUnreadBadge.classList.toggle("hidden", chatUnreadCount === 0);
 }
-
-// ============================================================
-// CHAT
-// ============================================================
 
 function openChatPanel() {
     if (!chatPanel) return;
@@ -259,14 +279,16 @@ function appendChatMessage(data) {
     if (!text) return;
 
     const message = document.createElement("div");
-    message.className = "chat-message" + (senderId && senderId === String(userId) ? " mine" : "");
+    message.className =
+        "chat-message" + (senderId && senderId === String(userId) ? " mine" : "");
 
     const meta = document.createElement("div");
     meta.className = "chat-message-meta";
 
     const name = document.createElement("span");
     name.className = "chat-message-name";
-    name.textContent = senderId && senderId === String(userId) ? "You" : senderName;
+    name.textContent =
+        senderId && senderId === String(userId) ? "You" : senderName;
 
     const time = document.createElement("span");
     time.className = "chat-message-time";
@@ -287,14 +309,10 @@ function appendChatMessage(data) {
     }
 }
 
+// PATCH 5: Chat over WebSocket.
 function sendChatMessage() {
     const text = String(chatInput?.value || "").trim();
     if (!text) return;
-
-    if (!wsConnected || !ws || ws.readyState !== WebSocket.OPEN) {
-        console.warn("⚠️ Cannot send chat: WebSocket not connected.");
-        return;
-    }
 
     const message = {
         type: "chat_message",
@@ -305,26 +323,21 @@ function sendChatMessage() {
         timestamp: new Date().toISOString()
     };
 
-    try {
-        ws.send(JSON.stringify(message));
-        appendChatMessage(message);
-        if (chatInput) {
-            chatInput.value = "";
-            chatInput.focus();
-        }
-    } catch (error) {
-        console.error("❌ Chat send error:", error);
+    if (!sendWS(message)) return;
+
+    // Backend broadcasts chat to everyone including the sender,
+    // so no local append is required here.
+    if (chatInput) {
+        chatInput.value = "";
+        chatInput.focus();
     }
 }
-
-// ============================================================
-// PARTICIPANTS LIST
-// ============================================================
 
 function renderParticipantsList() {
     if (!participantsList) return;
 
     const entries = [];
+
     entries.push([
         String(userId || "local"),
         {
@@ -346,6 +359,7 @@ function renderParticipantsList() {
         const existingIndex = entries.findIndex(
             ([, info]) => String(info.livekitIdentity || "") === identity
         );
+
         if (existingIndex >= 0) {
             const existingInfo = entries[existingIndex][1];
             existingInfo.livekitIdentity = identity;
@@ -354,13 +368,17 @@ function renderParticipantsList() {
             }
             return;
         }
-        entries.push([identity, {
-            userId: identity,
-            name: tile.participant?.name || "Participant",
-            isCreator: false,
-            canvasEnabled: false,
-            livekitIdentity: identity
-        }]);
+
+        entries.push([
+            identity,
+            {
+                userId: identity,
+                name: tile.participant?.name || "Participant",
+                isCreator: false,
+                canvasEnabled: false,
+                livekitIdentity: identity
+            }
+        ]);
     });
 
     participantsList.innerHTML = "";
@@ -378,7 +396,9 @@ function renderParticipantsList() {
 
         const name = document.createElement("div");
         name.className = "participant-list-name";
-        name.textContent = info.isLocal ? `${info.name || "You"} (You)` : info.name || "Participant";
+        name.textContent = info.isLocal
+            ? `${info.name || "You"} (You)`
+            : info.name || "Participant";
 
         const role = document.createElement("div");
         role.className = "participant-list-role";
@@ -395,30 +415,35 @@ function renderParticipantsList() {
     });
 
     const count = entries.length;
-    if (participantCount) participantCount.textContent = String(Math.max(count, 1 + remoteParticipants.size));
+    if (participantCount) {
+        participantCount.textContent = String(
+            Math.max(count, 1 + remoteParticipants.size)
+        );
+    }
     if (participantsPanelCount) {
         const displayCount = Math.max(count, 1 + remoteParticipants.size);
-        participantsPanelCount.textContent = `${displayCount} participant${displayCount === 1 ? "" : "s"}`;
+        participantsPanelCount.textContent =
+            `${displayCount} participant${displayCount === 1 ? "" : "s"}`;
     }
 }
 
 function initializeMeetingPanels() {
     if (chatButton) chatButton.addEventListener("click", openChatPanel);
     if (closeChatButton) closeChatButton.addEventListener("click", closeChatPanel);
-    if (participantsButton) participantsButton.addEventListener("click", openParticipantsPanel);
-    if (closeParticipantsButton) closeParticipantsButton.addEventListener("click", closeParticipantsPanel);
+    if (participantsButton)
+        participantsButton.addEventListener("click", openParticipantsPanel);
+    if (closeParticipantsButton)
+        closeParticipantsButton.addEventListener("click", closeParticipantsPanel);
+
     if (chatForm) {
         chatForm.addEventListener("submit", (event) => {
             event.preventDefault();
             sendChatMessage();
         });
     }
+
     updateParticipantCount();
 }
-
-// ============================================================
-// CANVAS AVAILABILITY
-// ============================================================
 
 function updateCanvasAvailability() {
     const canDraw = isMeetingCreator || canvasEnabled;
@@ -426,17 +451,17 @@ function updateCanvasAvailability() {
     if (clearCanvasBtn) {
         clearCanvasBtn.disabled = !canDraw;
         clearCanvasBtn.style.opacity = canDraw ? "1" : "0.45";
+        clearCanvasBtn.title = canDraw
+            ? "Clear your canvas"
+            : "The host has not given you drawing permission.";
     }
+
     if (gestureDisplay && !canDraw) gestureDisplay.textContent = "VIEW ONLY";
     if (confidenceDisplay && !canDraw) confidenceDisplay.textContent = "--";
 
     renderDrawingPermissions();
     renderDrawingPermissionRequest();
 }
-
-// ============================================================
-// PARTICIPANT PERMISSION REQUEST PANEL
-// ============================================================
 
 function renderDrawingPermissionRequest() {
     if (!meetingMain) return;
@@ -463,11 +488,13 @@ function renderDrawingPermissionRequest() {
 
     const text = document.createElement("div");
     if (drawingPermissionRequested) {
-        text.textContent = "⏳ Your drawing permission request is waiting for the host.";
+        text.textContent =
+            "⏳ Your drawing permission request is waiting for the host.";
     } else if (drawingPermissionStatus) {
         text.textContent = drawingPermissionStatus;
     } else {
-        text.textContent = "You are view-only. Ask the host for permission to draw.";
+        text.textContent =
+            "You are view-only. Ask the host for permission to draw.";
     }
     text.style.marginBottom = "9px";
 
@@ -483,15 +510,13 @@ function renderDrawingPermissionRequest() {
             type: "request_drawing",
             user_id: String(userId || liveKitIdentity),
             user_name: userName || "Participant",
-            livekit_identity: liveKitIdentity,
-            sender_identity: liveKitIdentity,
-            requester_user_id: String(userId || liveKitIdentity),
-            requester_livekit_identity: liveKitIdentity
+            livekit_identity: liveKitIdentity
         });
 
         if (!sent) {
             drawingPermissionRequested = false;
-            drawingPermissionStatus = "Could not contact the host. Please try again.";
+            drawingPermissionStatus =
+                "Could not contact the host. Please try again.";
             renderDrawingPermissionRequest();
         }
     };
@@ -499,13 +524,16 @@ function renderDrawingPermissionRequest() {
     if (drawingPermissionRequested) {
         button.textContent = "⏳ Request Pending";
         button.disabled = true;
+        button.style.cursor = "default";
     } else if (drawingPermissionStatus) {
         button.textContent = "Try Again";
         button.disabled = false;
+        button.style.cursor = "pointer";
         button.onclick = sendPermissionRequest;
     } else {
         button.textContent = "🎨 Ask Permission to Draw";
         button.disabled = false;
+        button.style.cursor = "pointer";
         button.onclick = sendPermissionRequest;
     }
 
@@ -514,14 +542,9 @@ function renderDrawingPermissionRequest() {
     button.style.borderRadius = "6px";
     button.style.background = "#2c3035";
     button.style.color = "#f2f3f4";
-    button.style.cursor = button.disabled ? "default" : "pointer";
 
     panel.append(text, button);
 }
-
-// ============================================================
-// HOST PERMISSION PANEL
-// ============================================================
 
 function renderDrawingPermissions() {
     if (!meetingMain) return;
@@ -541,12 +564,18 @@ function renderDrawingPermissions() {
         drawingPermissionsPanel.style.padding = "16px";
         drawingPermissionsPanel.style.borderRadius = "12px";
         drawingPermissionsPanel.style.background = "rgba(255,255,255,0.06)";
-        drawingPermissionsPanel.style.border = "1px solid rgba(255,255,255,0.12)";
+        drawingPermissionsPanel.style.border =
+            "1px solid rgba(255,255,255,0.12)";
         meetingMain.appendChild(drawingPermissionsPanel);
     }
 
-    const guests = [...participantInfo.entries()].filter(([, info]) => !info.isCreator);
-    const activeGuestDrawers = guests.filter(([, info]) => Boolean(info.canvasEnabled)).length;
+    const guests = [...participantInfo.entries()].filter(
+        ([, info]) => !info.isCreator
+    );
+
+    const activeGuestDrawers = guests.filter(([, info]) =>
+        Boolean(info.canvasEnabled)
+    ).length;
 
     drawingPermissionsPanel.innerHTML = "";
 
@@ -559,7 +588,9 @@ function renderDrawingPermissions() {
     subtitle.style.fontSize = "13px";
     subtitle.style.opacity = "0.75";
     subtitle.style.marginBottom = "12px";
-    subtitle.textContent = `You can draw. Choose up to ${MAX_GUEST_DRAWERS} participants. ${activeGuestDrawers}/${MAX_GUEST_DRAWERS} slots used.`;
+    subtitle.textContent =
+        `You can draw. Choose up to ${MAX_GUEST_DRAWERS} participants who can also draw. ` +
+        `${activeGuestDrawers}/${MAX_GUEST_DRAWERS} guest slots used.`;
 
     drawingPermissionsPanel.append(title, subtitle);
 
@@ -579,6 +610,8 @@ function renderDrawingPermissions() {
     list.style.overflowY = "auto";
 
     guests.forEach(([id, info]) => {
+        // `id` here is the backend user_id of the participant,
+        // because participant_joined stores it that way.
         const row = document.createElement("div");
         row.style.display = "flex";
         row.style.alignItems = "center";
@@ -598,7 +631,8 @@ function renderDrawingPermissions() {
         button.style.border = "0";
         button.style.borderRadius = "7px";
 
-        const hasRequest = drawingPermissionRequests.has(id) ||
+        const hasRequest =
+            drawingPermissionRequests.has(id) ||
             drawingPermissionRequests.has(info.livekitIdentity);
 
         if (info.canvasEnabled) {
@@ -606,44 +640,46 @@ function renderDrawingPermissions() {
             button.onclick = () => {
                 sendWS({
                     type: "revoke_drawing",
-                    target_user_id: id,
-                    target_livekit_identity: info.livekitIdentity || id
+                    target_user_id: String(id)
                 });
+                // Optimistic UI update
                 info.canvasEnabled = false;
-                participantInfo.set(id, info);
+                participantInfo.set(String(id), info);
                 renderDrawingPermissions();
             };
         } else if (hasRequest) {
             button.textContent = "Approve Drawing";
             button.disabled = activeGuestDrawers >= MAX_GUEST_DRAWERS;
+            button.title = button.disabled
+                ? `Only ${MAX_GUEST_DRAWERS} guest participants can draw at once.`
+                : "Approve this participant's drawing request";
             button.onclick = () => {
-                const targetIdentity = info.livekitIdentity || id;
                 sendWS({
                     type: "grant_drawing",
-                    target_user_id: id,
-                    target_livekit_identity: targetIdentity,
+                    target_user_id: String(id),
                     target_user_name: info.name || "Participant"
                 });
                 info.canvasEnabled = true;
-                drawingPermissionRequests.delete(id);
-                drawingPermissionRequests.delete(targetIdentity);
-                participantInfo.set(id, info);
+                drawingPermissionRequests.delete(String(id));
+                drawingPermissionRequests.delete(info.livekitIdentity);
+                participantInfo.set(String(id), info);
                 renderDrawingPermissions();
                 console.log(`✅ APPROVED DRAWING FOR ${info.name}`);
             };
         } else {
             button.textContent = "Give Drawing";
             button.disabled = activeGuestDrawers >= MAX_GUEST_DRAWERS;
+            button.title = button.disabled
+                ? `Only ${MAX_GUEST_DRAWERS} guest participants can draw at once.`
+                : "Give this participant drawing permission";
             button.onclick = () => {
-                const targetIdentity = info.livekitIdentity || id;
                 sendWS({
                     type: "grant_drawing",
-                    target_user_id: id,
-                    target_livekit_identity: targetIdentity,
+                    target_user_id: String(id),
                     target_user_name: info.name || "Participant"
                 });
                 info.canvasEnabled = true;
-                participantInfo.set(id, info);
+                participantInfo.set(String(id), info);
                 renderDrawingPermissions();
                 console.log(`✅ APPROVED DRAWING FOR ${info.name}`);
             };
@@ -655,10 +691,6 @@ function renderDrawingPermissions() {
 
     drawingPermissionsPanel.appendChild(list);
 }
-
-// ============================================================
-// UI HELPERS
-// ============================================================
 
 function updateLocalUI() {
     if (localParticipantLabel) localParticipantLabel.textContent = userName || "You";
@@ -697,14 +729,18 @@ if (currentTypedName) {
 
 function resizeCanvasPreserve(canvas, cssWidth, cssHeight) {
     if (!canvas || cssWidth <= 0 || cssHeight <= 0) return;
+
     const width = Math.max(1, Math.round(cssWidth));
     const height = Math.max(1, Math.round(cssHeight));
+
     if (canvas.width === width && canvas.height === height) return;
 
     let oldImage = null;
     try {
         if (canvas.width > 0 && canvas.height > 0) {
-            oldImage = canvas.getContext("2d")?.getImageData(0, 0, canvas.width, canvas.height);
+            oldImage = canvas
+                .getContext("2d")
+                ?.getImageData(0, 0, canvas.width, canvas.height);
         }
     } catch (_) {}
 
@@ -767,6 +803,7 @@ function hideLegacyRemoteCard() {
 
 function createRemoteTile(participant) {
     if (!participant) return null;
+
     const identity = String(participant.identity);
     if (!identity || identity === liveKitIdentity) return null;
 
@@ -777,7 +814,10 @@ function createRemoteTile(participant) {
         return existing;
     }
 
-    if (!participantsGrid) return null;
+    if (!participantsGrid) {
+        console.error("❌ Participant grid not found.");
+        return null;
+    }
 
     const card = document.createElement("div");
     card.className = "participant-card remote-participant-card";
@@ -794,7 +834,8 @@ function createRemoteTile(participant) {
 
     const waiting = document.createElement("div");
     waiting.className = "waiting-participant";
-    waiting.innerHTML = '<div class="participant-avatar">👤</div><span>Waiting for camera...</span>';
+    waiting.innerHTML =
+        '<div class="participant-avatar">👤</div><span>Waiting for camera...</span>';
 
     const remoteVid = document.createElement("video");
     remoteVid.autoplay = true;
@@ -804,6 +845,9 @@ function createRemoteTile(participant) {
     remoteVid.style.height = "100%";
     remoteVid.style.objectFit = "cover";
     remoteVid.style.transform = "none";
+    remoteVid.style.display = "block";
+    remoteVid.style.visibility = "visible";
+    remoteVid.style.opacity = "1";
 
     const canvas = document.createElement("canvas");
     canvas.className = "remote-drawing-canvas";
@@ -823,11 +867,20 @@ function createRemoteTile(participant) {
     participantsGrid.appendChild(card);
 
     const tile = {
-        identity, participant, card, label, container, waiting,
-        video: remoteVid, canvas, ctx: canvas.getContext("2d"), audio
+        identity,
+        participant,
+        card,
+        label,
+        container,
+        waiting,
+        video: remoteVid,
+        canvas,
+        ctx: canvas.getContext("2d"),
+        audio
     };
 
     remoteParticipants.set(identity, tile);
+
     requestAnimationFrame(() => {
         resizeRemoteCanvas(tile);
         flushPendingRemoteDrawingHistory(identity);
@@ -840,24 +893,41 @@ function createRemoteTile(participant) {
 function flushPendingRemoteDrawingHistory(identity) {
     const key = String(identity || "");
     if (!key || !remoteParticipants.has(key)) return;
+
     const events = pendingRemoteDrawingHistory.get(key);
     if (!Array.isArray(events) || !events.length) return;
+
     pendingRemoteDrawingHistory.delete(key);
+
     events.forEach((event) => {
-        try { handleRemoteDraw(event); } catch (error) { console.warn("⚠️ Replay error:", error); }
+        try {
+            handleRemoteDraw(event);
+        } catch (error) {
+            console.warn("⚠️ Could not replay drawing history:", error);
+        }
     });
+
+    console.log(`🖼️ Replayed ${events.length} drawing events for ${key}`);
 }
 
 function removeRemoteTile(identity) {
     const key = String(identity);
     const tile = remoteParticipants.get(key);
     if (!tile) return;
-    try { tile.video.srcObject = null; } catch (_) {}
-    try { tile.audio.srcObject = null; } catch (_) {}
+
+    try {
+        tile.video.srcObject = null;
+    } catch (_) {}
+    try {
+        tile.audio.srcObject = null;
+    } catch (_) {}
+
     if (tile.card) tile.card.remove();
+
     remoteParticipants.delete(key);
     remoteLastDrawPoint.delete(key);
     pendingRemoteDrawingHistory.delete(key);
+
     updateParticipantCount();
 }
 
@@ -869,35 +939,49 @@ function clearRemoteTiles() {
 function attachRemoteVideo(participant, track) {
     const tile = createRemoteTile(participant);
     if (!tile || !track) return;
+
     try {
         track.attach(tile.video);
         tile.video.style.transform = "none";
+        tile.video.style.display = "block";
+        tile.video.style.visibility = "visible";
+        tile.video.style.opacity = "1";
+        tile.canvas.style.transform = "none";
         tile.waiting.style.display = "none";
         tile.video.play().catch(() => {});
     } catch (error) {
-        console.error("❌ Video attach failed:", error);
+        console.error("❌ Remote video attach failed:", error);
     }
+
     requestAnimationFrame(() => resizeRemoteCanvas(tile));
 }
 
 function attachRemoteAudio(participant, track) {
     const tile = createRemoteTile(participant);
     if (!tile || !track) return;
+
     try {
         track.attach(tile.audio);
         tile.audio.play().catch(() => {});
     } catch (error) {
-        console.error("❌ Audio attach failed:", error);
+        console.error("❌ Remote audio attach failed:", error);
     }
 }
 
 function detachParticipantTrack(participant, track) {
     if (!participant || !track) return;
+
     const identity = String(participant.identity);
     const tile = remoteParticipants.get(identity);
     if (!tile) return;
-    try { track.detach(tile.video); } catch (_) {}
-    try { track.detach(tile.audio); } catch (_) {}
+
+    try {
+        track.detach(tile.video);
+    } catch (_) {}
+    try {
+        track.detach(tile.audio);
+    } catch (_) {}
+
     try {
         if (track.kind === window.LivekitClient.Track.Kind.Video) {
             tile.video.style.display = "none";
@@ -906,16 +990,31 @@ function detachParticipantTrack(participant, track) {
     } catch (_) {}
 }
 
+function detachRemoteTrack(participant, track) {
+    detachParticipantTrack(participant, track);
+}
+
 // ============================================================
 // CAMERA
 // ============================================================
 
 async function startLocalMedia() {
     if (localStream) return localStream;
-    if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera not available.");
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error(
+            "Camera access is not available in this browser/context."
+        );
+    }
+
+    console.log("🎥 Requesting camera and microphone...");
 
     localStream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } },
+        video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 30, max: 30 }
+        },
         audio: true
     });
 
@@ -926,42 +1025,83 @@ async function startLocalMedia() {
 
     isCameraStarted = true;
 
-    if (cameraStatus) { cameraStatus.textContent = "✅ Camera & Mic On"; cameraStatus.style.color = "#4caf50"; }
-    if (homeStartCamera) { homeStartCamera.textContent = "✅ Camera Started"; homeStartCamera.disabled = true; }
-    if (startCameraBtn) { startCameraBtn.textContent = "✅ Camera On"; startCameraBtn.disabled = true; }
+    if (cameraStatus) {
+        cameraStatus.textContent = "✅ Camera & Mic On";
+        cameraStatus.style.color = "#4caf50";
+    }
+    if (homeStartCamera) {
+        homeStartCamera.textContent = "✅ Camera Started";
+        homeStartCamera.disabled = true;
+    }
+    if (startCameraBtn) {
+        startCameraBtn.textContent = "✅ Camera On";
+        startCameraBtn.disabled = true;
+    }
 
     if (isMeetingCreator || canvasEnabled) initMediaPipe();
 
     setTimeout(setupCanvasSizes, 300);
+    console.log("✅ Camera and microphone started.");
+
     return localStream;
 }
 
 async function startCameraFromHome() {
     if (isCameraStarted) return;
-    userName = (userNameInput?.value || "").trim().slice(0, 30) || "Participant";
+
+    userName =
+        (userNameInput?.value || "").trim().slice(0, 30) || "Participant";
     localStorage.setItem("airCanvasUserName", userName);
     updateLocalUI();
-    try { await startLocalMedia(); } catch (error) {
-        console.error("❌ Camera error:", error);
-        if (cameraStatus) { cameraStatus.textContent = "❌ Camera denied"; cameraStatus.style.color = "#f44336"; }
-        if (homeStartCamera) { homeStartCamera.disabled = false; homeStartCamera.textContent = "🎥 Start Camera"; }
+
+    try {
+        await startLocalMedia();
+    } catch (error) {
+        console.error("❌ Camera/Microphone error:", error);
+        if (cameraStatus) {
+            cameraStatus.textContent = "❌ Camera/Microphone access denied";
+            cameraStatus.style.color = "#f44336";
+        }
+        if (homeStartCamera) {
+            homeStartCamera.disabled = false;
+            homeStartCamera.textContent = "🎥 Start Camera";
+        }
     }
 }
 
 async function startCameraFromMeeting() {
     if (isCameraStarted) return;
-    try { await startLocalMedia(); } catch (error) { alert("Could not access camera."); }
+    try {
+        await startLocalMedia();
+    } catch (error) {
+        console.error("❌ Camera error:", error);
+        alert("Could not access camera and microphone.");
+    }
 }
 
 function stopLocalMedia() {
-    if (camera) { try { camera.stop(); } catch (_) {} camera = null; }
-    if (localStream) localStream.getTracks().forEach((t) => { try { t.stop(); } catch (_) {} });
+    if (camera) {
+        try {
+            camera.stop();
+        } catch (_) {}
+        camera = null;
+    }
+
+    if (localStream) {
+        localStream.getTracks().forEach((track) => {
+            try {
+                track.stop();
+            } catch (_) {}
+        });
+    }
+
     localStream = null;
     isCameraStarted = false;
     mediaPipeStarted = false;
     hands = null;
     mediaPipeFrameCanvas = null;
     mediaPipeFrameCtx = null;
+
     if (video) video.srcObject = null;
 }
 
@@ -971,37 +1111,74 @@ function stopLocalMedia() {
 
 function initMediaPipe() {
     if (mediaPipeStarted || !window.Hands || !window.Camera) return;
+
     try {
-        hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
-        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.5 });
+        hands = new Hands({
+            locateFile: (file) =>
+                `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.5
+        });
+
         hands.onResults(onResults);
 
         mediaPipeFrameCanvas = document.createElement("canvas");
         mediaPipeFrameCanvas.width = MEDIAPIPE_PROCESS_WIDTH;
         mediaPipeFrameCanvas.height = MEDIAPIPE_PROCESS_HEIGHT;
-        mediaPipeFrameCtx = mediaPipeFrameCanvas.getContext("2d", { alpha: false, desynchronized: true });
+
+        mediaPipeFrameCtx = mediaPipeFrameCanvas.getContext("2d", {
+            alpha: false,
+            desynchronized: true
+        });
 
         camera = new Camera(video, {
             onFrame: async () => {
                 if (!mediaPipeFrameCtx || !video.videoWidth) return;
-                mediaPipeFrameCtx.drawImage(video, 0, 0, MEDIAPIPE_PROCESS_WIDTH, MEDIAPIPE_PROCESS_HEIGHT);
-                try { await hands.send({ image: mediaPipeFrameCanvas }); } catch (_) {}
+
+                mediaPipeFrameCtx.drawImage(
+                    video,
+                    0,
+                    0,
+                    MEDIAPIPE_PROCESS_WIDTH,
+                    MEDIAPIPE_PROCESS_HEIGHT
+                );
+
+                try {
+                    await hands.send({ image: mediaPipeFrameCanvas });
+                } catch (error) {
+                    console.warn("⚠️ MediaPipe frame error:", error);
+                }
             },
-            width: 1280, height: 720
+            width: 1280,
+            height: 720
         });
 
         camera.start();
         mediaPipeStarted = true;
+        console.log("🖐️ MediaPipe started.");
     } catch (error) {
-        console.error("❌ MediaPipe init failed:", error);
+        console.error("❌ MediaPipe initialization failed:", error);
     }
 }
 
 function stopMediaPipeOnly() {
-    if (camera) { try { camera.stop(); } catch (_) {} }
+    if (camera) {
+        try {
+            camera.stop();
+        } catch (_) {}
+    }
+
     camera = null;
     hands = null;
     mediaPipeStarted = false;
+    mediaPipeFrameCanvas = null;
+    mediaPipeFrameCtx = null;
+
     if (landmarkCanvas) clearCanvasElement(landmarkCanvas);
     resetDrawingState();
 }
@@ -1026,14 +1203,27 @@ function onResults(results) {
 
     const landmarks = results.multiHandLandmarks[0];
 
-    if (landmarkCanvas && typeof drawConnectors === "function" && typeof drawLandmarks === "function") {
+    if (
+        landmarkCanvas &&
+        typeof drawConnectors === "function" &&
+        typeof drawLandmarks === "function"
+    ) {
         const ctx = landmarkCanvas.getContext("2d");
-        drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: "#00FF00", lineWidth: 2 });
-        drawLandmarks(ctx, landmarks, { color: "#FF0000", lineWidth: 1, radius: 3 });
+        drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {
+            color: "#00FF00",
+            lineWidth: 2
+        });
+        drawLandmarks(ctx, landmarks, {
+            color: "#FF0000",
+            lineWidth: 1,
+            radius: 3
+        });
     }
 
     const values = [];
-    for (const point of landmarks) values.push(point.x, point.y);
+    for (const point of landmarks) {
+        values.push(point.x, point.y);
+    }
 
     if (activeGesture === "draw") drawGesture(values);
     else if (activeGesture === "erase") eraseGesture(values);
@@ -1049,6 +1239,7 @@ function onResults(results) {
 
 async function requestGesturePrediction() {
     if (predictionInProgress || !pendingLandmarks) return;
+
     predictionInProgress = true;
     const landmarks = pendingLandmarks;
     pendingLandmarks = null;
@@ -1059,25 +1250,59 @@ async function requestGesturePrediction() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ landmarks })
         });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        if (!response.ok) {
+            throw new Error(`Prediction HTTP ${response.status}`);
+        }
+
         const result = await response.json();
-        const gesture = String(result.confirmed_gesture || result.gesture || "no_gesture").toLowerCase();
+
+        const gesture = String(
+            result.confirmed_gesture ||
+                result.gesture ||
+                result.prediction ||
+                "no_gesture"
+        ).toLowerCase();
+
         const confidence = Number(result.confidence) || 0;
+
         updateGestureDisplay(gesture, confidence);
 
+        // PATCH 6: debounce the clear gesture.
         if (gesture === "clear") {
-            const now = Date.now();
-            if (now - lastClearTime >= CLEAR_COOLDOWN_MS) {
-                lastClearTime = now;
-                clearMyCanvasAndBroadcast();
+            clearGestureBuffer.push("clear");
+
+            if (clearGestureBuffer.length > CLEAR_HISTORY_SIZE) {
+                clearGestureBuffer.shift();
             }
+
+            if (clearGestureBuffer.length >= CLEAR_CONFIRM_FRAMES) {
+                const now = Date.now();
+
+                if (now - lastClearTime >= CLEAR_COOLDOWN_MS * 3) {
+                    lastClearTime = now;
+                    clearGestureBuffer = [];
+
+                    clearMyCanvasAndBroadcast();
+
+                    console.log(
+                        "🧹 CONFIRMED CLEAR — canvas wiped once"
+                    );
+                }
+            }
+
             resetDrawingState();
-        } else if (gesture !== "draw" && gesture !== "erase") {
+        } else if (gesture === "draw" || gesture === "erase") {
+            // A real drawing gesture resets the clear counter.
+            clearGestureBuffer = [];
+        } else {
+            clearGestureBuffer = [];
             resetDrawingState();
         }
     } catch (error) {
-        console.error("❌ Prediction error:", error);
+        console.error("❌ Backend prediction error:", error);
         activeGesture = "no_gesture";
+        activeConfidence = 0;
         resetDrawingState();
     } finally {
         predictionInProgress = false;
@@ -1088,8 +1313,20 @@ async function requestGesturePrediction() {
 function updateGestureDisplay(gesture, confidence) {
     activeGesture = gesture || "no_gesture";
     activeConfidence = Number(confidence) || 0;
-    if (gestureDisplay) gestureDisplay.textContent = activeGesture === "no_gesture" ? "NO GESTURE" : activeGesture.toUpperCase();
-    if (confidenceDisplay) confidenceDisplay.textContent = activeGesture === "no_gesture" ? "--" : `${Math.round(activeConfidence * 100)}%`;
+
+    if (gestureDisplay) {
+        gestureDisplay.textContent =
+            activeGesture === "no_gesture"
+                ? "NO GESTURE"
+                : activeGesture.toUpperCase();
+    }
+
+    if (confidenceDisplay) {
+        confidenceDisplay.textContent =
+            activeGesture === "no_gesture"
+                ? "--"
+                : `${Math.round(activeConfidence * 100)}%`;
+    }
 }
 
 function resetDrawingState() {
@@ -1106,12 +1343,15 @@ function resetDrawingState() {
 
 function drawGesture(values) {
     if (!airCanvas) return;
+
     const rawX = Number(values[16]);
     const rawY = Number(values[17]);
+
     if (!Number.isFinite(rawX) || !Number.isFinite(rawY)) return;
 
     const targetX = clamp(rawX, 0, 1) * airCanvas.width;
     const targetY = clamp(rawY, 0, 1) * airCanvas.height;
+
     const smoothing = 0.45;
 
     if (smoothDrawX === null) {
@@ -1137,24 +1377,48 @@ function drawGesture(values) {
     if (distance < 0.5) return;
 
     const maxJump = Math.max(airCanvas.width, airCanvas.height) * 0.12;
-    if (distance > maxJump) { lastDrawX = x; lastDrawY = y; return; }
+    if (distance > maxJump) {
+        lastDrawX = x;
+        lastDrawY = y;
+        return;
+    }
 
-    drawLine(airCanvas, lastDrawX / airCanvas.width, lastDrawY / airCanvas.height, x / airCanvas.width, y / airCanvas.height, "draw");
-    sendDrawData(x / airCanvas.width, y / airCanvas.height, lastDrawX / airCanvas.width, lastDrawY / airCanvas.height, "draw");
+    drawLine(
+        airCanvas,
+        lastDrawX / airCanvas.width,
+        lastDrawY / airCanvas.height,
+        x / airCanvas.width,
+        y / airCanvas.height,
+        "draw"
+    );
+
+    sendDrawData(
+        x / airCanvas.width,
+        y / airCanvas.height,
+        lastDrawX / airCanvas.width,
+        lastDrawY / airCanvas.height,
+        "draw"
+    );
+
     lastDrawX = x;
     lastDrawY = y;
 }
 
 function eraseGesture(values) {
     if (!airCanvas) return;
+
     const x = clamp(Number(values[16]), 0, 1);
     const y = clamp(Number(values[17]), 0, 1);
+
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
 
     const ctx = airCanvas.getContext("2d");
+    const px = x * airCanvas.width;
+    const py = y * airCanvas.height;
+
     ctx.globalCompositeOperation = "destination-out";
     ctx.beginPath();
-    ctx.arc(x * airCanvas.width, y * airCanvas.height, 20, 0, Math.PI * 2);
+    ctx.arc(px, py, 20, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalCompositeOperation = "source-over";
 
@@ -1164,44 +1428,65 @@ function eraseGesture(values) {
 
 function drawLine(canvas, x1, y1, x2, y2, action = "draw") {
     if (!canvas) return;
+
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+
     const px1 = clamp(x1, 0, 1) * canvas.width;
     const py1 = clamp(y1, 0, 1) * canvas.height;
     const px2 = clamp(x2, 0, 1) * canvas.width;
     const py2 = clamp(y2, 0, 1) * canvas.height;
+
     ctx.lineWidth = action === "erase" ? 20 : 3;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.globalCompositeOperation = action === "erase" ? "destination-out" : "source-over";
+    ctx.globalCompositeOperation =
+        action === "erase" ? "destination-out" : "source-over";
     ctx.strokeStyle = "#00ff00";
+
     ctx.beginPath();
     ctx.moveTo(px1, py1);
     ctx.lineTo(px2, py2);
     ctx.stroke();
+
     ctx.globalCompositeOperation = "source-over";
 }
 
 function drawDot(canvas, x, y, action = "draw") {
     if (!canvas) return;
+
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.globalCompositeOperation = action === "erase" ? "destination-out" : "source-over";
+
+    ctx.globalCompositeOperation =
+        action === "erase" ? "destination-out" : "source-over";
     ctx.fillStyle = "#00ff00";
+
     ctx.beginPath();
-    ctx.arc(clamp(x, 0, 1) * canvas.width, clamp(y, 0, 1) * canvas.height, action === "erase" ? 20 : 2.5, 0, Math.PI * 2);
+    ctx.arc(
+        clamp(x, 0, 1) * canvas.width,
+        clamp(y, 0, 1) * canvas.height,
+        action === "erase" ? 20 : 2.5,
+        0,
+        Math.PI * 2
+    );
     ctx.fill();
+
     ctx.globalCompositeOperation = "source-over";
 }
 
 function sendDrawData(x, y, prevX, prevY, action) {
     if (!isMeetingCreator && !canvasEnabled) return;
+
     const remoteX = 1 - clamp(Number(x), 0, 1);
     const remotePrevX = 1 - clamp(Number(prevX), 0, 1);
+
     if (!meetingActive || !wsConnected) return;
 
     const now = performance.now();
-    if (action === "draw" && now - lastDrawSendTime < DRAW_SEND_INTERVAL_MS) return;
+    if (action === "draw" && now - lastDrawSendTime < DRAW_SEND_INTERVAL_MS) {
+        return;
+    }
     lastDrawSendTime = now;
 
     sendWS({
@@ -1210,17 +1495,23 @@ function sendDrawData(x, y, prevX, prevY, action) {
         user_id: liveKitIdentity,
         user_name: userName,
         livekit_identity: liveKitIdentity,
-        x: remoteX, y: Number(y),
-        prev_x: remotePrevX, prev_y: Number(prevY),
-        lastX: remotePrevX, lastY: Number(prevY),
+        x: remoteX,
+        y: Number(y),
+        prev_x: remotePrevX,
+        prev_y: Number(prevY),
+        lastX: remotePrevX,
+        lastY: Number(prevY),
         action: action || "draw"
     });
 }
 
 function clearMyCanvasAndBroadcast() {
     if (!isMeetingCreator && !canvasEnabled) return;
+
     clearLocalCanvas();
+
     if (!meetingActive || !wsConnected) return;
+
     sendWS({
         type: "clear_canvas",
         meeting_id: meetingId,
@@ -1235,21 +1526,31 @@ function clearMyCanvasAndBroadcast() {
 // ============================================================
 
 function resolveRemoteIdentity(data) {
-    const direct = data.livekit_identity || data.sender_identity || data.participant_identity;
-    if (direct && remoteParticipants.has(String(direct))) return String(direct);
+    const direct =
+        data.livekit_identity ||
+        data.sender_identity ||
+        data.participant_identity;
+
+    if (direct && remoteParticipants.has(String(direct))) {
+        return String(direct);
+    }
+
     if (data.user_id && userIdToLiveKitIdentity.has(String(data.user_id))) {
         return userIdToLiveKitIdentity.get(String(data.user_id));
     }
+
     return direct ? String(direct) : null;
 }
 
 function handleRemoteDraw(data) {
     const identity = resolveRemoteIdentity(data);
     if (!identity || identity === liveKitIdentity) return;
+
     const tile = remoteParticipants.get(identity);
     if (!tile?.canvas) return;
 
     resizeRemoteCanvas(tile);
+
     const x = Number(data.x);
     const y = Number(data.y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
@@ -1258,7 +1559,13 @@ function handleRemoteDraw(data) {
         const ctx = tile.canvas.getContext("2d");
         ctx.globalCompositeOperation = "destination-out";
         ctx.beginPath();
-        ctx.arc(clamp(x, 0, 1) * tile.canvas.width, clamp(y, 0, 1) * tile.canvas.height, 20, 0, Math.PI * 2);
+        ctx.arc(
+            clamp(x, 0, 1) * tile.canvas.width,
+            clamp(y, 0, 1) * tile.canvas.height,
+            20,
+            0,
+            Math.PI * 2
+        );
         ctx.fill();
         ctx.globalCompositeOperation = "source-over";
         remoteLastDrawPoint.delete(identity);
@@ -1268,57 +1575,171 @@ function handleRemoteDraw(data) {
     const previousPoint = remoteLastDrawPoint.get(identity);
     const prevX = Number(data.prev_x ?? data.lastX);
     const prevY = Number(data.prev_y ?? data.lastY);
-    const startX = previousPoint && Number.isFinite(previousPoint.x) ? previousPoint.x : prevX;
-    const startY = previousPoint && Number.isFinite(previousPoint.y) ? previousPoint.y : prevY;
+
+    const startX =
+        previousPoint && Number.isFinite(previousPoint.x)
+            ? previousPoint.x
+            : prevX;
+    const startY =
+        previousPoint && Number.isFinite(previousPoint.y)
+            ? previousPoint.y
+            : prevY;
 
     if (Number.isFinite(startX) && Number.isFinite(startY)) {
         drawLine(tile.canvas, startX, startY, x, y, "draw");
     } else {
         drawDot(tile.canvas, x, y, "draw");
     }
+
     remoteLastDrawPoint.set(identity, { x, y });
 }
 
 function handleRemoteClear(data) {
     const identity = resolveRemoteIdentity(data);
     if (!identity || identity === liveKitIdentity) return;
+
     const tile = remoteParticipants.get(identity);
     if (tile) clearCanvasElement(tile.canvas);
     remoteLastDrawPoint.delete(identity);
 }
 
 // ============================================================
-// FASTAPI WEBSOCKET (permissions, chat, drawing sync)
+// LIVEKIT DATA (kept only for participant_hello role discovery)
+// ============================================================
+
+async function sendLiveKitData(message, options = {}) {
+    if (!liveKitRoom?.localParticipant || !liveKitConnected) {
+        console.warn("⚠️ LiveKit data channel is not ready.");
+        return false;
+    }
+
+    try {
+        const payload = new TextEncoder().encode(JSON.stringify(message));
+        await liveKitRoom.localParticipant.publishData(payload, {
+            reliable: options.reliable !== false,
+            destinationIdentities: options.destinationIdentities || [],
+            topic: options.topic || "aircanvas-control"
+        });
+        return true;
+    } catch (error) {
+        console.error("❌ LiveKit data send failed:", error);
+        return false;
+    }
+}
+
+function upsertLiveKitParticipant(participant, isCreator = false) {
+    if (!participant) return;
+    const identity = String(participant.identity || "");
+    if (!identity || identity === String(liveKitIdentity)) return;
+
+    const existing = participantInfo.get(identity) || {
+        userId: identity,
+        name: participant.name || "Participant",
+        isCreator: false,
+        livekitIdentity: identity,
+        canvasEnabled: false
+    };
+
+    existing.userId = identity;
+    existing.name = participant.name || existing.name || "Participant";
+    existing.livekitIdentity = identity;
+    if (isCreator) existing.isCreator = true;
+
+    participantInfo.set(identity, existing);
+    userIdToLiveKitIdentity.set(identity, identity);
+    liveKitIdentityToUserId.set(identity, identity);
+    updateParticipantCount();
+    renderDrawingPermissions();
+}
+
+function handleLiveKitData(payload, participant) {
+    try {
+        const decoded = new TextDecoder().decode(payload);
+        const data = JSON.parse(decoded);
+        const senderIdentity = participant?.identity
+            ? String(participant.identity)
+            : "";
+
+        if (data.type === "participant_hello") {
+            if (!senderIdentity) return;
+
+            const info = participantInfo.get(senderIdentity) || {
+                userId: senderIdentity,
+                name: data.user_name || participant?.name || "Participant",
+                isCreator: Boolean(data.is_creator),
+                livekitIdentity: senderIdentity,
+                canvasEnabled: Boolean(data.canvas_enabled)
+            };
+
+            info.userId = senderIdentity;
+            info.name =
+                data.user_name ||
+                info.name ||
+                participant?.name ||
+                "Participant";
+            info.isCreator = Boolean(data.is_creator);
+            info.livekitIdentity = senderIdentity;
+            info.canvasEnabled = Boolean(data.canvas_enabled);
+            participantInfo.set(senderIdentity, info);
+            userIdToLiveKitIdentity.set(senderIdentity, senderIdentity);
+            liveKitIdentityToUserId.set(senderIdentity, senderIdentity);
+
+            updateParticipantCount();
+            renderDrawingPermissions();
+            return;
+        }
+    } catch (error) {
+        console.error("❌ LiveKit data receive failed:", error);
+    }
+}
+
+// ============================================================
+// PATCH 4: sendWS now goes over the FastAPI WebSocket
 // ============================================================
 
 function sendWS(message) {
     if (!message) return false;
+
     const type = message.type;
-    if (type === "create_meeting" || type === "join_meeting") return true;
+
+    if (type === "create_meeting" || type === "join_meeting") {
+        // Registration is handled inside connectWebSocket().
+        return true;
+    }
 
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-        console.warn(`⚠️ Cannot send ${type}: WebSocket not connected.`);
+        console.warn(`⚠️ WebSocket not ready, cannot send ${type}`);
         return false;
     }
 
     try {
         ws.send(JSON.stringify(message));
-        if (type !== "draw_data") console.log(`📤 WebSocket send:`, message);
+
+        if (type !== "draw_data") {
+            console.log("📤 WS send:", message);
+        }
+
         return true;
     } catch (error) {
-        console.error(`❌ WebSocket send error (${type}):`, error);
+        console.error(`❌ WS send failed (${type}):`, error);
         return false;
     }
 }
 
+// ============================================================
+// PATCH 3: Actually open the FastAPI WebSocket
+// ============================================================
+
 function connectWebSocket() {
     return new Promise((resolve, reject) => {
         if (ws && ws.readyState === WebSocket.OPEN) {
+            wsConnected = true;
             resolve();
             return;
         }
 
         const url = `${WS_URL}/ws/${encodeURIComponent(meetingId)}`;
+
         console.log("🔌 Connecting WebSocket:", url);
 
         try {
@@ -1330,7 +1751,9 @@ function connectWebSocket() {
 
         const timeout = setTimeout(() => {
             console.error("❌ WebSocket registration timed out.");
-            try { ws.close(); } catch (_) {}
+            try {
+                ws.close();
+            } catch (_) {}
             reject(new Error("WebSocket registration timed out"));
         }, 15000);
 
@@ -1350,14 +1773,13 @@ function connectWebSocket() {
                 clearTimeout(timeout);
                 console.error("❌ Registration send error:", error);
                 reject(error);
-                return;
             }
         };
 
         ws.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                console.log("📨 WebSocket received:", data.type);
+                console.log("📨 WS received:", data.type);
 
                 if (data.type === "self_info" && !wsConnected) {
                     wsConnected = true;
@@ -1368,7 +1790,7 @@ function connectWebSocket() {
 
                 handleWebSocketMessage(data);
             } catch (error) {
-                console.error("❌ WebSocket message error:", error);
+                console.error("❌ WS message error:", error);
             }
         };
 
@@ -1388,8 +1810,11 @@ function connectWebSocket() {
 }
 
 function disconnectWebSocket() {
-    if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
-    if (ws) { try { ws.close(); } catch (_) {} }
+    if (ws) {
+        try {
+            ws.close();
+        } catch (_) {}
+    }
     ws = null;
     wsConnected = false;
 }
@@ -1405,12 +1830,20 @@ function handleWebSocketMessage(data) {
         case "self_info":
             if (data.user_id) userId = data.user_id;
             if (data.user_name) userName = data.user_name;
-            if (data.livekit_identity) liveKitIdentity = String(data.livekit_identity);
+
             if (data.is_creator !== undefined) {
-                isMeetingCreator = Boolean(data.is_creator) || isMeetingCreator;
+                isMeetingCreator =
+                    Boolean(data.is_creator) || isMeetingCreator;
             }
 
-            canvasEnabled = Boolean(isMeetingCreator) || Boolean(data.canvas_enabled) || Boolean(data.is_creator);
+            if (data.livekit_identity) {
+                liveKitIdentity = String(data.livekit_identity);
+            }
+
+            canvasEnabled =
+                Boolean(isMeetingCreator) ||
+                Boolean(data.canvas_enabled) ||
+                Boolean(data.is_creator);
 
             if (isMeetingCreator || canvasEnabled) {
                 if (!mediaPipeStarted && video?.srcObject) initMediaPipe();
@@ -1419,6 +1852,7 @@ function handleWebSocketMessage(data) {
             }
 
             updateCanvasAvailability();
+
             localStorage.setItem("airCanvasUserId", userId);
             localStorage.setItem("airCanvasUserName", userName);
             updateLocalUI();
@@ -1426,36 +1860,39 @@ function handleWebSocketMessage(data) {
 
         case "creator_info":
             if (data.creator_id) {
-                const creatorIdentity = data.creator_livekit_identity ? String(data.creator_livekit_identity) : null;
                 participantInfo.set(String(data.creator_id), {
                     userId: String(data.creator_id),
                     name: data.creator_name || "Host",
                     isCreator: true,
-                    livekitIdentity: creatorIdentity,
+                    livekitIdentity: data.creator_livekit_identity
+                        ? String(data.creator_livekit_identity)
+                        : null,
                     canvasEnabled: true
                 });
-                if (creatorIdentity) {
-                    userIdToLiveKitIdentity.set(String(data.creator_id), creatorIdentity);
-                    liveKitIdentityToUserId.set(creatorIdentity, String(data.creator_id));
-                }
             }
             break;
 
         case "participant_joined": {
             const id = data.user_id ? String(data.user_id) : null;
+
             if (id) {
                 participantInfo.set(id, {
                     userId: id,
                     name: data.user_name || "Participant",
                     isCreator: Boolean(data.is_creator),
-                    livekitIdentity: data.livekit_identity ? String(data.livekit_identity) : null,
+                    livekitIdentity: data.livekit_identity
+                        ? String(data.livekit_identity)
+                        : null,
                     canvasEnabled: Boolean(data.canvas_enabled)
                 });
+
                 if (data.livekit_identity) {
-                    userIdToLiveKitIdentity.set(id, String(data.livekit_identity));
-                    liveKitIdentityToUserId.set(String(data.livekit_identity), id);
+                    const identity = String(data.livekit_identity);
+                    userIdToLiveKitIdentity.set(id, identity);
+                    liveKitIdentityToUserId.set(identity, id);
                 }
             }
+
             updateParticipantCount();
             renderDrawingPermissions();
             break;
@@ -1465,11 +1902,16 @@ function handleWebSocketMessage(data) {
             if (data.user_id) {
                 const id = String(data.user_id);
                 const identity = userIdToLiveKitIdentity.get(id);
+
                 if (identity) removeRemoteTile(identity);
                 userIdToLiveKitIdentity.delete(id);
                 participantInfo.delete(id);
             }
-            if (data.livekit_identity) removeRemoteTile(String(data.livekit_identity));
+
+            if (data.livekit_identity) {
+                removeRemoteTile(String(data.livekit_identity));
+            }
+
             updateParticipantCount();
             renderDrawingPermissions();
             break;
@@ -1477,61 +1919,72 @@ function handleWebSocketMessage(data) {
 
         case "request_drawing":
         case "drawing_permission_request": {
-            const requesterIdentity = String(
-                data.sender_identity || data.requester_livekit_identity ||
-                data.livekit_identity || data.user_id || ""
+            const requesterId = String(
+                data.user_id || data.requester_user_id || ""
             );
 
-            if (!isMeetingCreator || !requesterIdentity || requesterIdentity === String(liveKitIdentity)) break;
+            if (!isMeetingCreator || !requesterId) break;
+            if (requesterId === String(userId)) break;
 
-            const requesterUserId = String(data.requester_user_id || data.user_id || requesterIdentity);
+            const requesterIdentity = data.livekit_identity
+                ? String(data.livekit_identity)
+                : null;
 
-            drawingPermissionRequests.add(requesterIdentity);
-            drawingPermissionRequests.add(requesterUserId);
+            drawingPermissionRequests.add(requesterId);
+            if (requesterIdentity)
+                drawingPermissionRequests.add(requesterIdentity);
 
-            const existing = participantInfo.get(requesterIdentity) || {
-                userId: requesterIdentity,
+            const existing = participantInfo.get(requesterId) || {
+                userId: requesterId,
                 name: data.user_name || "Participant",
                 isCreator: false,
                 livekitIdentity: requesterIdentity,
                 canvasEnabled: false
             };
 
-            existing.userId = requesterIdentity;
+            existing.userId = requesterId;
             existing.name = data.user_name || existing.name || "Participant";
-            existing.livekitIdentity = requesterIdentity;
-            existing.backendUserId = requesterUserId;
+            existing.livekitIdentity =
+                requesterIdentity || existing.livekitIdentity;
             existing.isCreator = false;
 
-            participantInfo.set(requesterIdentity, existing);
-            userIdToLiveKitIdentity.set(requesterUserId, requesterIdentity);
-            userIdToLiveKitIdentity.set(requesterIdentity, requesterIdentity);
-            liveKitIdentityToUserId.set(requesterIdentity, requesterUserId);
+            participantInfo.set(requesterId, existing);
+
+            if (requesterIdentity) {
+                userIdToLiveKitIdentity.set(requesterId, requesterIdentity);
+                liveKitIdentityToUserId.set(requesterIdentity, requesterId);
+            }
 
             renderDrawingPermissions();
-            console.log(`🙋 DRAW REQUEST RECEIVED | ${existing.name} | ${requesterIdentity}`);
+            console.log(
+                `🙋 DRAW REQUEST RECEIVED | ${existing.name} | ${requesterId}`
+            );
             break;
         }
 
-        case "drawing_permission_denied":
+        case "drawing_permission_denied": {
             drawingPermissionRequested = false;
-            drawingPermissionStatus = String(data.message || "Drawing permission unavailable.");
-            renderDrawingPermissionRequest();
-            break;
-
-        case "drawing_permission":
-        case "grant_drawing": {
-            const targetIdentity = String(
-                data.target_livekit_identity || data.target_user_id ||
-                data.livekit_identity || data.user_id || ""
+            drawingPermissionStatus = String(
+                data.message || "Drawing permission is currently unavailable."
             );
-            if (!targetIdentity) break;
+            renderDrawingPermissionRequest();
+            console.log(
+                "🚫 Drawing permission unavailable:",
+                drawingPermissionStatus
+            );
+            break;
+        }
+
+        case "drawing_permission": {
+            const targetId = String(data.user_id || "");
 
             const isForMe =
-                targetIdentity === String(liveKitIdentity) ||
-                targetIdentity === String(userId);
+                targetId === String(userId) ||
+                (data.livekit_identity &&
+                    String(data.livekit_identity) ===
+                        String(liveKitIdentity));
 
-            const permissionEnabled = data.type === "grant_drawing" ? true : Boolean(data.canvas_enabled);
+            const permissionEnabled = Boolean(data.canvas_enabled);
 
             if (isForMe) {
                 drawingPermissionRequested = false;
@@ -1539,43 +1992,76 @@ function handleWebSocketMessage(data) {
                 canvasEnabled = permissionEnabled;
 
                 if (canvasEnabled) {
-                    if (!mediaPipeStarted && video?.srcObject) initMediaPipe();
+                    if (!mediaPipeStarted && video?.srcObject)
+                        initMediaPipe();
                 } else {
                     stopMediaPipeOnly();
                 }
 
                 resetDrawingState();
                 updateCanvasAvailability();
-                console.log(`🎨 DRAWING PERMISSION ${permissionEnabled ? "APPROVED" : "REMOVED"} FOR ME`);
+                console.log(
+                    `🎨 DRAWING PERMISSION ${
+                        permissionEnabled ? "APPROVED" : "REMOVED"
+                    } FOR ME`
+                );
                 break;
             }
 
-            const existing = participantInfo.get(targetIdentity) || {
-                userId: targetIdentity,
-                name: data.target_user_name || data.user_name || "Participant",
-                isCreator: false,
-                livekitIdentity: targetIdentity,
-                canvasEnabled: false
-            };
-            existing.canvasEnabled = permissionEnabled;
-            existing.livekitIdentity = targetIdentity;
-            existing.name = data.target_user_name || data.user_name || existing.name;
-            participantInfo.set(targetIdentity, existing);
+            if (targetId) {
+                const existing = participantInfo.get(targetId) || {
+                    userId: targetId,
+                    name: data.user_name || "Participant",
+                    isCreator: false,
+                    livekitIdentity: data.livekit_identity || null,
+                    canvasEnabled: false
+                };
 
-            if (isMeetingCreator) {
-                drawingPermissionRequests.delete(targetIdentity);
-                renderDrawingPermissions();
+                existing.canvasEnabled = permissionEnabled;
+                if (data.livekit_identity) {
+                    existing.livekitIdentity = String(
+                        data.livekit_identity
+                    );
+                }
+                participantInfo.set(targetId, existing);
+
+                if (isMeetingCreator) {
+                    drawingPermissionRequests.delete(targetId);
+                    renderDrawingPermissions();
+                }
+
+                console.log(
+                    `🎨 Permission for ${existing.name}: ${
+                        permissionEnabled ? "ENABLED" : "DISABLED"
+                    }`
+                );
             }
-            console.log(`🎨 Permission for ${existing.name}: ${permissionEnabled ? "ENABLED" : "DISABLED"}`);
             break;
         }
 
         case "room_participants": {
-            const incoming = Array.isArray(data.participants) ? data.participants : [];
+            const incoming = Array.isArray(data.participants)
+                ? data.participants
+                : [];
+
             incoming.forEach((participant) => {
-                const id = participant.user_id ? String(participant.user_id) : null;
+                const id = participant.user_id
+                    ? String(participant.user_id)
+                    : null;
                 if (!id) return;
-                const identity = participant.livekit_identity ? String(participant.livekit_identity) : null;
+
+                const identity = participant.livekit_identity
+                    ? String(participant.livekit_identity)
+                    : null;
+
+                // Do not overwrite the local entry.
+                if (id === String(userId)) {
+                    canvasEnabled =
+                        Boolean(participant.canvas_enabled) ||
+                        Boolean(participant.is_creator);
+                    return;
+                }
+
                 participantInfo.set(id, {
                     userId: id,
                     name: participant.user_name || "Participant",
@@ -1583,12 +2069,10 @@ function handleWebSocketMessage(data) {
                     livekitIdentity: identity,
                     canvasEnabled: Boolean(participant.canvas_enabled)
                 });
+
                 if (identity) {
                     userIdToLiveKitIdentity.set(id, identity);
                     liveKitIdentityToUserId.set(identity, id);
-                }
-                if (id === String(userId)) {
-                    canvasEnabled = Boolean(participant.canvas_enabled) || Boolean(participant.is_creator);
                 }
             });
 
@@ -1597,6 +2081,7 @@ function handleWebSocketMessage(data) {
             } else {
                 stopMediaPipeOnly();
             }
+
             updateCanvasAvailability();
             renderDrawingPermissions();
             break;
@@ -1604,19 +2089,26 @@ function handleWebSocketMessage(data) {
 
         case "drawing_history": {
             const events = Array.isArray(data.events) ? data.events : [];
+
             events.forEach((event) => {
                 const identity = resolveRemoteIdentity(event);
                 if (!identity || identity === liveKitIdentity) return;
+
                 if (remoteParticipants.has(identity)) {
                     handleRemoteDraw(event);
                 } else {
                     if (!pendingRemoteDrawingHistory.has(identity)) {
                         pendingRemoteDrawingHistory.set(identity, []);
                     }
-                    pendingRemoteDrawingHistory.get(identity).push(event);
+                    pendingRemoteDrawingHistory
+                        .get(identity)
+                        .push(event);
                 }
             });
-            console.log(`🖼️ Drawing history: ${events.length} events`);
+
+            console.log(
+                `🖼️ Drawing history received: ${events.length} events`
+            );
             break;
         }
 
@@ -1633,11 +2125,14 @@ function handleWebSocketMessage(data) {
             break;
 
         case "room_full":
-            alert(`Meeting full. Max ${MAX_PARTICIPANTS} participants.`);
+            alert(
+                `This meeting is full. Maximum ${MAX_PARTICIPANTS} participants.`
+            );
             break;
 
         case "error":
             console.error("❌ Server error:", data.message);
+            alert(data.message || "Server error.");
             break;
 
         default:
@@ -1646,63 +2141,146 @@ function handleWebSocketMessage(data) {
 }
 
 // ============================================================
-// LIVEKIT
+// LIVEKIT SDK LOADING
 // ============================================================
 
 function loadLiveKitSDK() {
-    if (window.LivekitClient) return Promise.resolve(window.LivekitClient);
+    if (window.LivekitClient) {
+        return Promise.resolve(window.LivekitClient);
+    }
+
     if (liveKitSDKPromise) return liveKitSDKPromise;
 
     liveKitSDKPromise = new Promise((resolve, reject) => {
+        const existing = document.querySelector(
+            'script[data-livekit-sdk="true"]'
+        );
+
+        if (existing) {
+            existing.addEventListener("load", () =>
+                resolve(window.LivekitClient)
+            );
+            existing.addEventListener("error", () =>
+                reject(new Error("LiveKit SDK failed to load."))
+            );
+            return;
+        }
+
         const script = document.createElement("script");
-        script.src = "https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js";
+        script.src =
+            "https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js";
         script.async = true;
-        script.onload = () => window.LivekitClient ? resolve(window.LivekitClient) : reject(new Error("LiveKit global missing."));
-        script.onerror = () => reject(new Error("LiveKit SDK load failed."));
+        script.dataset.livekitSdk = "true";
+
+        script.onload = () => {
+            if (window.LivekitClient) {
+                resolve(window.LivekitClient);
+            } else {
+                reject(
+                    new Error(
+                        "LiveKit SDK loaded but global was not found."
+                    )
+                );
+            }
+        };
+        script.onerror = () =>
+            reject(new Error("Could not load LiveKit SDK."));
+
         document.head.appendChild(script);
     });
 
     return liveKitSDKPromise;
 }
 
+// ============================================================
+// LIVEKIT
+// ============================================================
+
 async function connectLiveKit() {
     if (liveKitConnected) return;
-    if (!meetingId || !localStream) throw new Error("Meeting or local media missing.");
+
+    if (!meetingId || !localStream) {
+        throw new Error("Meeting or local media missing.");
+    }
 
     const LK = await loadLiveKitSDK();
+
     console.log("🔵 Connecting to LiveKit...");
 
-    const tokenSource = LK.TokenSource.developmentTokenServer(LIVEKIT_TOKEN_SERVER_ID);
+    const tokenSource = LK.TokenSource.developmentTokenServer(
+        LIVEKIT_TOKEN_SERVER_ID
+    );
+
     const credentials = await tokenSource.fetch({
         roomName: meetingId,
         participantIdentity: liveKitIdentity,
         participantName: userName
     });
 
-    if (!credentials?.participantToken) throw new Error("No LiveKit token.");
+    if (!credentials?.participantToken) {
+        throw new Error("LiveKit token was not returned.");
+    }
 
-    liveKitRoom = new LK.Room({ adaptiveStream: true, dynacast: true });
-
-    liveKitRoom.on(LK.RoomEvent.TrackSubscribed, (track, publication, participant) => {
-        if (String(participant.identity) === liveKitIdentity) return;
-        const tile = createRemoteTile(participant);
-        if (!tile) return;
-        if (track.kind === LK.Track.Kind.Video) attachRemoteVideo(participant, track);
-        else if (track.kind === LK.Track.Kind.Audio) attachRemoteAudio(participant, track);
+    liveKitRoom = new LK.Room({
+        adaptiveStream: true,
+        dynacast: true
     });
 
-    liveKitRoom.on(LK.RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
-        detachParticipantTrack(participant, track);
+    // LiveKit Data is only used for participant_hello role discovery.
+    liveKitRoom.on(LK.RoomEvent.DataReceived, (payload, participant) => {
+        handleLiveKitData(payload, participant);
     });
+
+    liveKitRoom.on(
+        LK.RoomEvent.TrackSubscribed,
+        (track, publication, participant) => {
+            const identity = String(participant.identity);
+            if (identity === liveKitIdentity) return;
+
+            const tile = createRemoteTile(participant);
+            if (!tile) return;
+
+            if (track.kind === LK.Track.Kind.Video) {
+                attachRemoteVideo(participant, track);
+            } else if (track.kind === LK.Track.Kind.Audio) {
+                attachRemoteAudio(participant, track);
+            }
+        }
+    );
+
+    liveKitRoom.on(
+        LK.RoomEvent.TrackUnsubscribed,
+        (track, publication, participant) => {
+            detachParticipantTrack(participant, track);
+        }
+    );
 
     liveKitRoom.on(LK.RoomEvent.ParticipantConnected, (participant) => {
-        if (String(participant.identity) === liveKitIdentity) return;
+        const identity = String(participant.identity);
+        if (identity === liveKitIdentity) return;
+
+        console.log(
+            "👤 LiveKit participant joined:",
+            participant.name || identity
+        );
+
         createRemoteTile(participant);
+
+        sendLiveKitData(
+            {
+                type: "participant_hello",
+                user_name: userName,
+                is_creator: isMeetingCreator,
+                canvas_enabled: Boolean(isMeetingCreator || canvasEnabled)
+            },
+            { reliable: true, topic: "aircanvas-control" }
+        );
     });
 
     liveKitRoom.on(LK.RoomEvent.ParticipantDisconnected, (participant) => {
         const identity = String(participant.identity);
         removeRemoteTile(identity);
+
         const id = liveKitIdentityToUserId.get(identity);
         if (id) {
             liveKitIdentityToUserId.delete(identity);
@@ -1710,43 +2288,74 @@ async function connectLiveKit() {
         }
     });
 
-    await liveKitRoom.connect(credentials.serverUrl || LIVEKIT_SERVER_URL, credentials.participantToken);
+    await liveKitRoom.connect(
+        credentials.serverUrl || LIVEKIT_SERVER_URL,
+        credentials.participantToken
+    );
+
     liveKitConnected = true;
-    console.log("✅ LiveKit connected:", liveKitIdentity);
 
-    liveKitRoom.remoteParticipants.forEach((participant) => {
-        createRemoteTile(participant);
-        for (const publication of participant.trackPublications.values()) {
-            if (publication.isSubscribed && publication.track) {
-                if (publication.kind === LK.Track.Kind.Video) attachRemoteVideo(participant, publication.track);
-                else if (publication.kind === LK.Track.Kind.Audio) attachRemoteAudio(participant, publication.track);
-            } else if (!publication.isSubscribed) {
-                try { publication.setSubscribed(true); } catch (_) {}
-            }
-        }
-    });
+    console.log("✅ LIVEKIT CONNECTED:", liveKitIdentity);
 
+    // Broadcast our identity.
+    await sendLiveKitData(
+        {
+            type: "participant_hello",
+            user_name: userName,
+            is_creator: isMeetingCreator,
+            canvas_enabled: Boolean(isMeetingCreator || canvasEnabled)
+        },
+        { reliable: true, topic: "aircanvas-control" }
+    );
+
+    // Publish camera and microphone.
     const cameraTrack = localStream.getVideoTracks()[0];
     if (cameraTrack) {
         await liveKitRoom.localParticipant.publishTrack(cameraTrack, {
             name: "air-canvas-camera",
             source: LK.Track.Source.Camera
         });
+        console.log("📤 Camera published.");
     }
 
-    const micTrack = localStream.getAudioTracks()[0];
-    if (micTrack) {
-        await liveKitRoom.localParticipant.publishTrack(micTrack, {
+    const microphoneTrack = localStream.getAudioTracks()[0];
+    if (microphoneTrack) {
+        await liveKitRoom.localParticipant.publishTrack(microphoneTrack, {
             name: "air-canvas-microphone",
             source: LK.Track.Source.Microphone
         });
+        console.log("📤 Microphone published.");
     }
+
+    // Attach any existing tracks.
+    liveKitRoom.remoteParticipants.forEach((participant) => {
+        createRemoteTile(participant);
+
+        for (const publication of participant.trackPublications.values()) {
+            if (publication.isSubscribed && publication.track) {
+                if (publication.kind === LK.Track.Kind.Video) {
+                    attachRemoteVideo(participant, publication.track);
+                } else if (publication.kind === LK.Track.Kind.Audio) {
+                    attachRemoteAudio(participant, publication.track);
+                }
+            } else if (!publication.isSubscribed) {
+                try {
+                    publication.setSubscribed(true);
+                } catch (_) {}
+            }
+        }
+    });
 
     updateParticipantCount();
 }
 
 function disconnectLiveKit() {
-    if (liveKitRoom) { try { liveKitRoom.disconnect(); } catch (_) {} }
+    if (liveKitRoom) {
+        try {
+            liveKitRoom.disconnect();
+        } catch (_) {}
+    }
+
     liveKitRoom = null;
     liveKitConnected = false;
     clearRemoteTiles();
@@ -1758,14 +2367,21 @@ function disconnectLiveKit() {
 
 function setupMeetingUI() {
     showMeeting();
-    if (meetingIdDisplay) meetingIdDisplay.textContent = `Meeting ID: ${meetingId}`;
+
+    if (meetingIdDisplay)
+        meetingIdDisplay.textContent = `Meeting ID: ${meetingId}`;
     if (meetingIdLarge) meetingIdLarge.textContent = meetingId;
+
     updateLocalUI();
-    if (remoteParticipantLabel) remoteParticipantLabel.textContent = "Participant";
+
+    if (remoteParticipantLabel)
+        remoteParticipantLabel.textContent = "Participant";
     if (waitingParticipant) waitingParticipant.style.display = "block";
+
     hideLegacyRemoteCard();
     clearRemoteTiles();
     clearLocalCanvas();
+
     updateParticipantCount();
     updateCanvasAvailability();
     renderDrawingPermissions();
@@ -1773,53 +2389,74 @@ function setupMeetingUI() {
 
 async function createMeeting() {
     if (meetingActive) return;
-    userName = (userNameInput?.value || "").trim().slice(0, 30) || "Participant";
+
+    userName =
+        (userNameInput?.value || "").trim().slice(0, 30) || "Participant";
     localStorage.setItem("airCanvasUserName", userName);
     updateLocalUI();
 
     try {
         isMeetingCreator = true;
         canvasEnabled = true;
+
         if (!isCameraStarted) await startLocalMedia();
+
         meetingId = generateMeetingId();
         meetingActive = true;
+
         setupMeetingUI();
+
         await connectWebSocket();
         await connectLiveKit();
+
+        isMeetingCreator = true;
+        canvasEnabled = true;
         updateCanvasAvailability();
         if (!mediaPipeStarted) initMediaPipe();
+
         console.log("🎉 Meeting created:", meetingId);
     } catch (error) {
         console.error("❌ Could not create meeting:", error);
         meetingActive = false;
         await cleanupMeeting(false);
         showHome();
-        alert("Could not create the meeting.");
+        alert("Could not create the meeting. Check the browser console.");
     }
 }
 
 async function joinMeeting() {
     if (meetingActive) return;
-    userName = (userNameInput?.value || "").trim().slice(0, 30) || "Participant";
+
+    userName =
+        (userNameInput?.value || "").trim().slice(0, 30) || "Participant";
     localStorage.setItem("airCanvasUserName", userName);
+
     meetingId = normalizeMeetingId(meetingIdInput?.value);
-    if (!meetingId) { alert("Please enter Meeting ID."); return; }
+    if (!meetingId) {
+        alert("Please enter the Meeting ID.");
+        return;
+    }
 
     isMeetingCreator = false;
 
     try {
         if (!isCameraStarted) await startLocalMedia();
+
         meetingActive = true;
         setupMeetingUI();
+
         await connectWebSocket();
         await connectLiveKit();
+
         console.log("🎉 Joined meeting:", meetingId);
     } catch (error) {
         console.error("❌ Could not join meeting:", error);
         meetingActive = false;
         await cleanupMeeting(false);
         showHome();
-        alert("Could not join the meeting.");
+        alert(
+            "Could not join the meeting. Check the Meeting ID and browser console."
+        );
     }
 }
 
@@ -1829,11 +2466,20 @@ async function joinMeeting() {
 
 async function toggleMute() {
     if (!localStream) return;
+
     isMuted = !isMuted;
-    localStream.getAudioTracks().forEach((track) => (track.enabled = !isMuted));
+    localStream
+        .getAudioTracks()
+        .forEach((track) => (track.enabled = !isMuted));
+
     if (liveKitRoom?.localParticipant) {
-        try { await liveKitRoom.localParticipant.setMicrophoneEnabled(!isMuted); } catch (_) {}
+        try {
+            await liveKitRoom.localParticipant.setMicrophoneEnabled(!isMuted);
+        } catch (error) {
+            console.warn("⚠️ LiveKit microphone toggle:", error);
+        }
     }
+
     if (muteButton) {
         muteButton.textContent = isMuted ? "🔇 Muted" : "🎤 Mic";
         muteButton.classList.toggle("muted", isMuted);
@@ -1842,13 +2488,24 @@ async function toggleMute() {
 
 async function toggleCamera() {
     if (!localStream) return;
+
     isCameraOff = !isCameraOff;
-    localStream.getVideoTracks().forEach((track) => (track.enabled = !isCameraOff));
+    localStream
+        .getVideoTracks()
+        .forEach((track) => (track.enabled = !isCameraOff));
+
     if (liveKitRoom?.localParticipant) {
-        try { await liveKitRoom.localParticipant.setCameraEnabled(!isCameraOff); } catch (_) {}
+        try {
+            await liveKitRoom.localParticipant.setCameraEnabled(!isCameraOff);
+        } catch (error) {
+            console.warn("⚠️ LiveKit camera toggle:", error);
+        }
     }
+
     if (cameraButton) {
-        cameraButton.textContent = isCameraOff ? "🚫 Camera Off" : "📹 Camera";
+        cameraButton.textContent = isCameraOff
+            ? "🚫 Camera Off"
+            : "📹 Camera";
         cameraButton.classList.toggle("camera-off", isCameraOff);
     }
 }
@@ -1862,32 +2519,43 @@ async function copyMeetingIdToClipboard() {
             copyMeetingId.textContent = "✅ Copied!";
             setTimeout(() => (copyMeetingId.textContent = old), 1200);
         }
-    } catch (error) { console.error("❌ Copy error:", error); }
+    } catch (error) {
+        console.error("❌ Clipboard error:", error);
+    }
 }
 
-function clearCanvasButtonAction() { clearMyCanvasAndBroadcast(); }
+function clearCanvasButtonAction() {
+    clearMyCanvasAndBroadcast();
+}
 
 async function cleanupMeeting(stopCameraToo = true) {
     meetingActive = false;
+
     disconnectLiveKit();
     disconnectWebSocket();
     clearRemoteTiles();
     clearLocalCanvas();
     clearCanvasElement(landmarkCanvas);
+
     if (stopCameraToo) stopLocalMedia();
 
     meetingId = null;
     isMeetingCreator = false;
     canvasEnabled = false;
 
-    if (drawingPermissionsPanel) { drawingPermissionsPanel.remove(); drawingPermissionsPanel = null; }
+    if (drawingPermissionsPanel) {
+        drawingPermissionsPanel.remove();
+        drawingPermissionsPanel = null;
+    }
 
     participantInfo.clear();
     userIdToLiveKitIdentity.clear();
     liveKitIdentityToUserId.clear();
+
     drawingPermissionRequested = false;
     drawingPermissionStatus = "";
     drawingPermissionRequests.clear();
+    clearGestureBuffer = [];
 
     activeGesture = "no_gesture";
     activeConfidence = 0;
@@ -1898,23 +2566,48 @@ async function cleanupMeeting(stopCameraToo = true) {
     if (meetingIdInput) meetingIdInput.value = "";
     if (meetingIdLarge) meetingIdLarge.textContent = "------";
     if (meetingIdDisplay) meetingIdDisplay.textContent = "Meeting ID: ------";
-    if (muteButton) { muteButton.textContent = "🎤 Mic"; muteButton.classList.remove("muted"); }
-    if (cameraButton) { cameraButton.textContent = "📹 Camera"; cameraButton.classList.remove("camera-off"); }
+
+    if (muteButton) {
+        muteButton.textContent = "🎤 Mic";
+        muteButton.classList.remove("muted");
+    }
+    if (cameraButton) {
+        cameraButton.textContent = "📹 Camera";
+        cameraButton.classList.remove("camera-off");
+    }
     if (leaveMeetingBtn) leaveMeetingBtn.disabled = true;
 }
 
 async function leaveMeeting() {
     if (!meetingActive) return;
-    sendWS({ type: "leave_meeting", meeting_id: meetingId, user_id: userId, user_name: userName, livekit_identity: liveKitIdentity });
+
+    sendWS({
+        type: "leave_meeting",
+        meeting_id: meetingId,
+        user_id: userId,
+        user_name: userName,
+        livekit_identity: liveKitIdentity
+    });
+
     await cleanupMeeting(true);
     showHome();
-    if (homeStartCamera) { homeStartCamera.textContent = "🎥 Start Camera"; homeStartCamera.disabled = false; }
-    if (startCameraBtn) { startCameraBtn.textContent = "Start Camera"; startCameraBtn.disabled = false; }
-    if (cameraStatus) { cameraStatus.textContent = "Camera is off"; cameraStatus.style.color = ""; }
+
+    if (homeStartCamera) {
+        homeStartCamera.textContent = "🎥 Start Camera";
+        homeStartCamera.disabled = false;
+    }
+    if (startCameraBtn) {
+        startCameraBtn.textContent = "Start Camera";
+        startCameraBtn.disabled = false;
+    }
+    if (cameraStatus) {
+        cameraStatus.textContent = "Camera is off";
+        cameraStatus.style.color = "";
+    }
 }
 
 // ============================================================
-// EVENT LISTENERS
+// BUTTONS
 // ============================================================
 
 homeStartCamera?.addEventListener("click", startCameraFromHome);
@@ -1927,14 +2620,22 @@ cameraButton?.addEventListener("click", toggleCamera);
 leaveMeetingBtn?.addEventListener("click", leaveMeeting);
 copyMeetingId?.addEventListener("click", copyMeetingIdToClipboard);
 
-meetingIdInput?.addEventListener("keydown", (event) => { if (event.key === "Enter") joinMeeting(); });
+meetingIdInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") joinMeeting();
+});
 
 window.addEventListener("resize", setupCanvasSizes);
 
 window.addEventListener("beforeunload", () => {
-    try { ws?.close(); } catch (_) {}
-    try { liveKitRoom?.disconnect(); } catch (_) {}
-    try { localStream?.getTracks().forEach((t) => t.stop()); } catch (_) {}
+    try {
+        ws?.close();
+    } catch (_) {}
+    try {
+        liveKitRoom?.disconnect();
+    } catch (_) {}
+    try {
+        localStream?.getTracks().forEach((track) => track.stop());
+    } catch (_) {}
 });
 
 // ============================================================
@@ -1949,13 +2650,17 @@ function initializeApplication() {
     updateParticipantCount();
     updateCanvasAvailability();
     setConnectionStatus("Disconnected");
+
     if (meetingScreen) meetingScreen.classList.add("hidden");
     if (homeScreen) homeScreen.classList.remove("hidden");
+
     console.log("🚀 Air Canvas initialized.");
 }
 
 if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initializeApplication, { once: true });
+    document.addEventListener("DOMContentLoaded", initializeApplication, {
+        once: true
+    });
 } else {
     initializeApplication();
 }
