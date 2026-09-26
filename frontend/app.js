@@ -605,25 +605,34 @@
         }
     }
 
-    function sendChatMessage() {
-        const text =
-            String(
-                chatInput?.value || ""
-            ).trim();
+    async function sendChatMessage() {
+        const text = String(chatInput?.value || "").trim();
+        if (!text) return;
 
-        if (!text) {
+        if (!liveKitConnected || !liveKitRoom?.localParticipant) {
+            console.warn("⚠️ Cannot send chat: LiveKit is not connected.");
             return;
         }
 
-        const sent =
-            sendWS({
-                type: "chat_message",
-                message: text
-            });
+        const message = {
+            type: "chat_message",
+            user_id: String(userId || liveKitIdentity),
+            user_name: userName || "Participant",
+            livekit_identity: liveKitIdentity,
+            message: text,
+            timestamp: new Date().toISOString()
+        };
 
-        if (!sent) {
-            return;
-        }
+        const sent = await sendLiveKitData(message, {
+            reliable: true,
+            topic: "aircanvas-control"
+        });
+
+        if (!sent) return;
+
+        // LiveKit does not echo a client's own Data packet back to itself.
+        appendChatMessage(message);
+        console.log("📤 LiveKit Data:", message);
 
         if (chatInput) {
             chatInput.value = "";
@@ -3316,9 +3325,21 @@
             // The existing message handler already knows how to render chat,
             // drawing, permission and clear events. Give it the LiveKit sender identity.
             if (senderIdentity) {
-                data.user_id = data.user_id || senderIdentity;
-                data.livekit_identity = data.livekit_identity || senderIdentity;
-                data.user_name = data.user_name || participant?.name || "Participant";
+                // Permission packets carry a target. Do not confuse the
+                // sender (host) with the participant being granted permission.
+                data.user_id =
+                    data.user_id ||
+                    data.target_user_id ||
+                    senderIdentity;
+                data.livekit_identity =
+                    data.livekit_identity ||
+                    data.target_livekit_identity ||
+                    (data.target_user_id ? data.target_user_id : senderIdentity);
+                data.user_name =
+                    data.user_name ||
+                    data.target_user_name ||
+                    participant?.name ||
+                    "Participant";
             }
 
             handleWebSocketMessage(data);
@@ -3346,6 +3367,16 @@
             if (message.target_user_id) {
                 destinationIdentities = [String(message.target_user_id)];
             }
+
+            // Carry the target in the packet too; the receiver must know
+            // that the permission is for itself, not for the host sender.
+            message.user_id = String(message.target_user_id || message.user_id || "");
+            message.livekit_identity = String(
+                message.target_livekit_identity ||
+                message.target_user_id ||
+                message.livekit_identity ||
+                ""
+            );
         }
 
         const reliable = type !== "draw_data";
@@ -3415,7 +3446,9 @@
                         );
                 }
 
+                // Host always has drawing permission.
                 canvasEnabled =
+                    Boolean(isMeetingCreator) ||
                     Boolean(data.canvas_enabled) ||
                     Boolean(data.is_creator);
 
@@ -3625,9 +3658,10 @@
             }
 
             case "drawing_permission": {
-                const id = data.user_id
-                    ? String(data.user_id)
-                    : null;
+                const id =
+                    data.target_user_id
+                        ? String(data.target_user_id)
+                        : (data.user_id ? String(data.user_id) : null);
 
                 if (!id) {
                     break;
@@ -4421,6 +4455,14 @@
             await connectWebSocket();
 
             await connectLiveKit();
+
+            // Final host permission guard.
+            isMeetingCreator = true;
+            canvasEnabled = true;
+            updateCanvasAvailability();
+            if (!mediaPipeStarted) {
+                initMediaPipe();
+            }
 
             console.log(
                 "🎉 Meeting created:",
