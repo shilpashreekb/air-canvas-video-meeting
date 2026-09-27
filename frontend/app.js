@@ -189,7 +189,38 @@ function setConnectionStatus(text) {
     }
 }
 
+// ------------------------------------------------------------
+// FIX: remove any participantInfo entry that has no matching
+// remote video tile in LiveKit. Runs on every UI refresh.
+// This cleans up stale entries left behind when a participant
+// refreshes or reconnects with a new liveKitIdentity.
+// ------------------------------------------------------------
+function pruneStaleParticipants() {
+    if (!liveKitRoom) return;
+
+    const activeIdentities = new Set();
+    liveKitRoom.remoteParticipants.forEach((p) => {
+        activeIdentities.add(String(p.identity));
+    });
+
+    for (const [id, info] of [...participantInfo.entries()]) {
+        if (String(id) === String(userId)) continue;
+        if (info.isCreator) continue;
+
+        const identity = info.livekitIdentity
+            ? String(info.livekitIdentity)
+            : String(id);
+
+        if (!activeIdentities.has(identity)) {
+            participantInfo.delete(id);
+        }
+    }
+}
+
 function updateParticipantCount() {
+    // Prune before we count so stale entries don't inflate the count.
+    pruneStaleParticipants();
+
     const count = 1 + remoteParticipants.size;
 
     if (participantCount) {
@@ -341,11 +372,17 @@ async function sendChatMessage() {
     }
 }
 
+// ------------------------------------------------------------
+// FIX: dedupe by livekitIdentity so one person appears once
+// even if participantInfo briefly contains two keys for them.
+// ------------------------------------------------------------
 function renderParticipantsList() {
     if (!participantsList) return;
 
     const entries = [];
+    const seenIdentityKeys = new Set();
 
+    // Local user
     entries.push([
         String(userId || "local"),
         {
@@ -357,11 +394,21 @@ function renderParticipantsList() {
         }
     ]);
 
+    // Remote entries from participantInfo (deduped by identity)
     participantInfo.forEach((info, id) => {
         if (String(id) === String(userId)) return;
+
+        const identityKey = info.livekitIdentity
+            ? String(info.livekitIdentity)
+            : String(id);
+
+        if (seenIdentityKeys.has(identityKey)) return;
+        seenIdentityKeys.add(identityKey);
+
         entries.push([String(id), info]);
     });
 
+    // Merge remote video tiles (don't add if identity already covered)
     remoteParticipants.forEach((tile) => {
         const identity = String(tile.identity);
 
@@ -382,6 +429,9 @@ function renderParticipantsList() {
             }
             return;
         }
+
+        if (seenIdentityKeys.has(identity)) return;
+        seenIdentityKeys.add(identity);
 
         entries.push([
             identity,
@@ -617,9 +667,7 @@ function renderDrawingPermissions() {
         meetingMain.appendChild(drawingPermissionsPanel);
     }
 
-    // Build a de-duplicated list of guests. If two records share the
-    // same livekitIdentity, keep only one (prefer the one that has
-    // canvasEnabled === true).
+    // Deduplicate guests by livekitIdentity.
     const seenIdentities = new Set();
     const guests = [];
 
@@ -647,10 +695,7 @@ function renderDrawingPermissions() {
             guests.push([id, info]);
         });
 
-    // Only show guests that need attention:
-    //   - already have drawing permission, OR
-    //   - have a pending permission request.
-    // Participants who merely joined are hidden.
+    // Only show guests who have a pending request or granted permission.
     const visibleGuests = guests.filter(([id, info]) => {
         const hasPermission = Boolean(info.canvasEnabled);
         const hasRequest =
@@ -925,23 +970,18 @@ function clearLocalCanvas() {
 // PARTICIPANT IDENTITY HELPERS
 // ============================================================
 
-// Find the canonical participantInfo key for a given backend user_id
-// or LiveKit identity. Returns null if no matching record exists.
 function findCanonicalParticipantKey(idOrIdentity) {
     const key = String(idOrIdentity || "");
     if (!key) return null;
 
-    // Direct hit
     if (participantInfo.has(key)) return key;
 
-    // Match by livekitIdentity field
     for (const [id, info] of participantInfo.entries()) {
         if (info.livekitIdentity && String(info.livekitIdentity) === key) {
             return id;
         }
     }
 
-    // Match by userId field
     for (const [id, info] of participantInfo.entries()) {
         if (String(info.userId) === key) return id;
     }
@@ -1076,17 +1116,10 @@ function flushPendingRemoteDrawingHistory(identity) {
     });
 }
 
-// ------------------------------------------------------------
-// FIXED: removeRemoteTile now ALWAYS cleans participantInfo
-// entries that match this identity — even when no video tile
-// exists. Prevents stale "phantom" duplicate rows when a
-// participant reconnects with a fresh LiveKit identity.
-// ------------------------------------------------------------
 function removeRemoteTile(identity) {
     const key = String(identity);
     if (!key) return;
 
-    // 1. Always clean participantInfo (by key or by identity field).
     for (const [infoId, info] of [...participantInfo.entries()]) {
         const matchesKey = String(infoId) === key;
         const matchesIdentity =
@@ -1098,7 +1131,6 @@ function removeRemoteTile(identity) {
         }
     }
 
-    // 2. Remove the remote video tile if it exists.
     const tile = remoteParticipants.get(key);
 
     if (tile) {
@@ -1115,7 +1147,6 @@ function removeRemoteTile(identity) {
         pendingRemoteDrawingHistory.delete(key);
     }
 
-    // 3. Refresh UI counts and permission panel.
     updateParticipantCount();
     renderDrawingPermissions();
 }
@@ -1875,8 +1906,6 @@ function upsertLiveKitParticipant(participant, isCreator = false) {
     const identity = String(participant.identity || "");
     if (!identity || identity === String(liveKitIdentity)) return;
 
-    // Look for any existing record — under any key — that
-    // represents this participant.
     const existingKey = findCanonicalParticipantKey(identity);
 
     if (existingKey) {
@@ -1897,7 +1926,6 @@ function upsertLiveKitParticipant(participant, isCreator = false) {
         return;
     }
 
-    // No record yet — create a new one keyed by identity.
     const newInfo = {
         userId: identity,
         name: participant.name || "Participant",
@@ -1926,7 +1954,6 @@ function handleLiveKitData(payload, participant) {
         if (data.type === "participant_hello") {
             if (!senderIdentity) return;
 
-            // Merge into any existing record for this identity.
             const existingKey = findCanonicalParticipantKey(senderIdentity);
 
             if (existingKey) {
@@ -1968,6 +1995,12 @@ function handleLiveKitData(payload, participant) {
         }
 
         if (senderIdentity) {
+            // FIX: preserve sender_identity so downstream handlers can
+            // resolve the requester even when the packet only carries
+            // a backend user_id.
+            data.sender_identity =
+                data.sender_identity || senderIdentity;
+
             data.user_id =
                 data.user_id || data.target_user_id || senderIdentity;
             data.livekit_identity =
@@ -2172,39 +2205,84 @@ function handleWebSocketMessage(data) {
             break;
         }
 
+        // ----------------------------------------------------
+        // FIX: match by any available identifier and add all
+        // of them to drawingPermissionRequests so render() will
+        // find the participant.
+        // ----------------------------------------------------
         case "request_drawing":
         case "drawing_permission_request": {
-            const requesterId = data.user_id || data.livekit_identity || data.sender_identity
-                ? String(data.user_id || data.livekit_identity || data.sender_identity)
-                : null;
+            if (!isMeetingCreator) break;
 
-            if (isMeetingCreator && requesterId) {
-                drawingPermissionRequests.add(requesterId);
+            const candidates = [
+                data.sender_identity,
+                data.requester_livekit_identity,
+                data.livekit_identity,
+                data.user_id,
+                data.requester_user_id
+            ]
+                .filter(Boolean)
+                .map(String);
 
-                // Find existing participant record; do not create a new one.
-                const existingKey = findCanonicalParticipantKey(requesterId);
+            if (!candidates.length) break;
 
-                if (existingKey) {
-                    const existing = participantInfo.get(existingKey);
-                    existing.name = data.user_name || existing.name;
-                    existing.livekitIdentity =
-                        data.livekit_identity || existing.livekitIdentity;
-                    participantInfo.set(existingKey, existing);
-                } else {
-                    // No record yet — create one, keyed by whichever
-                    // identity we have.
-                    participantInfo.set(requesterId, {
-                        userId: requesterId,
-                        name: data.user_name || "Participant",
-                        isCreator: false,
-                        livekitIdentity: data.livekit_identity || null,
-                        canvasEnabled: false
-                    });
+            // Find canonical participant record.
+            let existingKey = null;
+            for (const c of candidates) {
+                const k = findCanonicalParticipantKey(c);
+                if (k) {
+                    existingKey = k;
+                    break;
                 }
-
-                renderDrawingPermissions();
-                console.log(`🙋 Drawing permission requested by ${data.user_name || "Participant"}`);
             }
+
+            // Add every identifier to the request set so the
+            // renderer can match by id OR by livekitIdentity.
+            candidates.forEach((c) =>
+                drawingPermissionRequests.add(c)
+            );
+
+            if (existingKey) {
+                const existing = participantInfo.get(existingKey);
+                existing.name = data.user_name || existing.name;
+                if (data.livekit_identity) {
+                    existing.livekitIdentity = String(data.livekit_identity);
+                }
+                if (data.user_id) {
+                    existing.userId = String(data.user_id);
+                }
+                participantInfo.set(existingKey, existing);
+                drawingPermissionRequests.add(existingKey);
+
+                if (existing.livekitIdentity) {
+                    userIdToLiveKitIdentity.set(
+                        existing.userId,
+                        existing.livekitIdentity
+                    );
+                    liveKitIdentityToUserId.set(
+                        existing.livekitIdentity,
+                        existingKey
+                    );
+                }
+            } else {
+                // No record yet — create keyed by the best available id.
+                const key = candidates[0];
+                participantInfo.set(key, {
+                    userId: data.user_id || key,
+                    name: data.user_name || "Participant",
+                    isCreator: false,
+                    livekitIdentity: data.livekit_identity || null,
+                    canvasEnabled: false
+                });
+                drawingPermissionRequests.add(key);
+            }
+
+            renderDrawingPermissions();
+            console.log(
+                `🙋 Drawing permission requested by ${
+                    data.user_name || "Participant"
+                }`
+            );
             break;
         }
 
@@ -2244,7 +2322,6 @@ function handleWebSocketMessage(data) {
 
             if (!id) break;
 
-            // Find existing record — do not create duplicates.
             const existingKey =
                 findCanonicalParticipantKey(id) || id;
 
@@ -2315,8 +2392,6 @@ function handleWebSocketMessage(data) {
                 ? data.participants
                 : [];
 
-            // Track which identities are in the fresh snapshot so
-            // we can prune anything stale.
             const freshKeys = new Set();
 
             incoming.forEach((participant) => {
@@ -2330,7 +2405,6 @@ function handleWebSocketMessage(data) {
                     ? String(participant.livekit_identity)
                     : null;
 
-                // Skip ourselves.
                 if (
                     backendId === String(userId) ||
                     (identity && identity === String(liveKitIdentity))
@@ -2341,7 +2415,6 @@ function handleWebSocketMessage(data) {
                     return;
                 }
 
-                // Find any existing record for this person and reuse it.
                 const existingKey =
                     findCanonicalParticipantKey(identity) ||
                     findCanonicalParticipantKey(backendId) ||
@@ -2363,8 +2436,6 @@ function handleWebSocketMessage(data) {
                 }
             });
 
-            // Prune any participantInfo entries that are not in the
-            // fresh snapshot. Prevents stale duplicates.
             for (const [infoId] of [...participantInfo.entries()]) {
                 if (!freshKeys.has(String(infoId))) {
                     participantInfo.delete(infoId);
@@ -2577,13 +2648,8 @@ async function connectLiveKit() {
             { reliable: true, topic: "aircanvas-control" }
         );
 
-        for (const [id, info] of participantInfo) {
-            if (info.livekitIdentity === identity) {
-                userIdToLiveKitIdentity.set(id, identity);
-                liveKitIdentityToUserId.set(identity, id);
-                break;
-            }
-        }
+        // Prune any stale entries.
+        updateParticipantCount();
     });
 
     liveKitRoom.on(LK.RoomEvent.ParticipantDisconnected, (participant) => {
@@ -2595,6 +2661,8 @@ async function connectLiveKit() {
             liveKitIdentityToUserId.delete(identity);
             userIdToLiveKitIdentity.delete(id);
         }
+
+        updateParticipantCount();
     });
 
     await liveKitRoom.connect(
@@ -3008,15 +3076,6 @@ function initializeApplication() {
         homeScreen.classList.remove("hidden");
     }
 
-    // ----------------------------------------------------------
-    // FIXED: Re-run canvas sizing whenever the local video
-    // container is resized. This handles:
-    //   - window resize
-    //   - grid re-layout when a participant joins or leaves
-    //   - any other layout shift
-    // Without this, landmarkCanvas/airCanvas buffers keep their
-    // pre-join dimensions and drawing positions become wrong.
-    // ----------------------------------------------------------
     if (
         typeof ResizeObserver !== "undefined" &&
         video &&
