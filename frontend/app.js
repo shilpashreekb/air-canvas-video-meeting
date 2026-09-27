@@ -25,7 +25,8 @@ const DRAW_SEND_INTERVAL_MS = 30;
 const CLEAR_COOLDOWN_MS = 700;
 const DRAWING_HISTORY_CHUNK_SIZE = 30;
 
-const REACTION_OPTIONS = ["👍", "👏", "❤️", "😂", "😮", "🎉"];
+// "Raise Hand" now lives inside the Reactions menu.
+const REACTION_OPTIONS = ["👍", "❤️", "😂", "😮", "🎉", "👋"];
 const NOTIFICATION_LIFETIME_MS = 3000;
 
 const homeScreen = document.getElementById("homeScreen");
@@ -49,8 +50,8 @@ const remoteCanvas = document.getElementById("remoteCanvas");
 const remoteAudio = document.getElementById("remoteAudio");
 const airCanvas = document.getElementById("airCanvas");
 const landmarkCanvas = document.getElementById("landmarkCanvas");
-// Gesture / Confidence UI was removed from the HTML; these now resolve to null
-// and every reference is null-guarded, so MediaPipe still runs unchanged.
+// Gesture / Confidence UI is intentionally absent — these stay null and
+// every reference is null-guarded so MediaPipe runs exactly as before.
 const gestureDisplay = document.getElementById("gesture");
 const confidenceDisplay = document.getElementById("confidence");
 const startCameraBtn = document.getElementById("startCamera");
@@ -94,9 +95,7 @@ let userName = "Participant";
 let isMeetingCreator = false;
 let meetingActive = false;
 let canvasEnabled = false;
-let drawingPermissionsPanel = null;
 let drawingPermissionRequested = false;
-let drawingPermissionStatus = "";
 const drawingPermissionRequests = new Set();
 
 let isCameraStarted = false;
@@ -106,7 +105,7 @@ let isCameraOff = false;
 let liveKitIdentity =
     "aircanvas-" + Math.random().toString(36).substring(2, 10);
 
-// ----- New feature state -------------------------------------
+// ----- Feature state -----------------------------------------
 const raisedHands = new Set();
 let isScreenSharing = false;
 let screenShareStream = null;
@@ -137,14 +136,15 @@ let lastSentDrawY = null;
 let localDrawingHistory = [];
 
 // ----- Drawing tool UI state ---------------------------------
-// These control ONLY how the existing drawing engine renders.
+// These affect only how the existing drawing engine renders.
 // They do NOT touch landmark normalization, canvas mapping,
-// coordinate conversion, or the sync message format.
+// coordinate conversion or the sync message format.
 let drawingToolEnabled = false;   // DRAW ON / OFF
 let drawingColor = "#00ff00";     // stroke colour
 let drawingThickness = 3;         // stroke width
-let eraserEnabled = false;        // eraser mode
-let eraserSize = 20;              // eraser radius
+let eraserSize = 20;              // eraser radius (erasing only
+                                  // happens when the gesture
+                                  // pipeline reports "erase")
 
 const remoteParticipants = new Map();
 const userIdToLiveKitIdentity = new Map();
@@ -446,7 +446,7 @@ function ensureFeatureStyles() {
     const style = document.createElement("style");
     style.id = "airCanvasFeatureStyles";
     style.textContent = `
-        /* Zoom-style centered meeting notifications */
+        /* Centered, professional meeting notifications */
         .meeting-notifications {
             position: fixed;
             top: 14%;
@@ -461,15 +461,15 @@ function ensureFeatureStyles() {
             max-width: 92vw;
         }
         .meeting-notification {
-            background: #1f2227;
-            color: #eef0f2;
-            border: 1px solid rgba(255, 255, 255, 0.10);
+            background: #ffffff;
+            color: #1a2430;
+            border: 1px solid #e1e7ef;
             border-radius: 12px;
             padding: 12px 22px;
             font-size: 14px;
-            font-weight: 500;
+            font-weight: 600;
             line-height: 1.4;
-            box-shadow: 0 16px 44px rgba(0, 0, 0, 0.60);
+            box-shadow: 0 16px 44px rgba(15, 40, 90, 0.18);
             opacity: 0;
             transform: translateY(-10px);
             transition: opacity 0.28s ease, transform 0.28s ease;
@@ -487,32 +487,69 @@ function ensureFeatureStyles() {
             transform: translateY(-10px);
         }
 
-        /* Reactions menu */
+        /* Reactions menu — white popover grid */
         .reactions-menu {
             position: fixed;
             z-index: 9998;
-            background: #1b1d20;
-            border: 1px solid #34383e;
-            border-radius: 10px;
-            padding: 6px;
-            display: flex;
+            background: #ffffff;
+            border: 1px solid #e1e7ef;
+            border-radius: 12px;
+            padding: 8px;
+            display: grid;
+            grid-template-columns: repeat(6, 44px);
             gap: 4px;
-            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+            box-shadow: 0 16px 40px rgba(15, 40, 90, 0.18);
         }
         .reactions-menu.hidden { display: none !important; }
+
         .reaction-option {
-            width: 40px;
-            height: 40px;
+            width: 44px;
+            height: 44px;
             border: 0;
-            border-radius: 8px;
+            border-radius: 10px;
             background: transparent;
             font-size: 22px;
             cursor: pointer;
             transition: background 0.15s ease, transform 0.15s ease;
         }
         .reaction-option:hover {
-            background: #2c3035;
+            background: #f0f5ff;
             transform: scale(1.08);
+        }
+
+        /* Divider + Raise Hand row below the emoji grid */
+        .reactions-menu .reaction-sep {
+            grid-column: 1 / -1;
+            height: 1px;
+            background: #e1e7ef;
+            margin: 4px 2px;
+        }
+        .reactions-menu .reaction-hand {
+            grid-column: 1 / -1;
+            width: 100%;
+            height: 40px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background: #f5f8fc;
+            border: 1px solid #e1e7ef;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #1a2430;
+            border-radius: 8px;
+        }
+        .reactions-menu .reaction-hand::before {
+            content: "✋";
+            font-size: 1.05rem;
+        }
+        .reactions-menu .reaction-hand.active {
+            background: #eff6ff;
+            border-color: #2563eb;
+            color: #2563eb;
+        }
+        .reactions-menu .reaction-hand.active::before {
+            content: "🖐️";
         }
 
         /* Reaction bubble on a video tile */
@@ -537,9 +574,8 @@ function ensureFeatureStyles() {
             transform: translateY(-20px) scale(1.15);
         }
 
-        /* Remote screen share overlay.
-           transform: none overrides the mirroring rule so shared screens
-           are never horizontally flipped. */
+        /* Remote screen share overlay. transform: none overrides the
+           mirroring rule so shared screens are never horizontally flipped. */
         .remote-video-container .remote-screenshare-video {
             position: absolute;
             inset: 0;
@@ -558,14 +594,10 @@ function ensureFeatureStyles() {
             display: inline-block;
         }
 
-        /* Active-state colour for Hand / Share toolbar buttons */
-        .toolbar-btn.hand-raised,
-        .toolbar-btn.sharing,
-        .control-button.hand-raised,
-        .control-button.sharing {
-            background: rgba(79, 140, 255, 0.15) !important;
-            border-color: #4f8cff !important;
-            color: #cfe0ff !important;
+        .toolbar-btn.sharing {
+            background: #eff6ff !important;
+            border-color: #2563eb !important;
+            color: #2563eb !important;
         }
 
         /* =====================================================
@@ -591,9 +623,9 @@ function ensureFeatureStyles() {
         .card-control-btn {
             width: 30px;
             height: 30px;
-            border: 1px solid rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.18);
             border-radius: 6px;
-            background: rgba(15, 15, 18, 0.78);
+            background: rgba(15, 20, 25, 0.78);
             color: #f1f2f3;
             font-size: 14px;
             cursor: pointer;
@@ -605,8 +637,8 @@ function ensureFeatureStyles() {
             transition: background 0.15s ease, border-color 0.15s ease;
         }
         .card-control-btn:hover {
-            background: rgba(40, 40, 46, 0.95);
-            border-color: rgba(255, 255, 255, 0.3);
+            background: rgba(37, 99, 235, 0.9);
+            border-color: #2563eb;
         }
 
         /* Pinned layout — pinned card spans all columns */
@@ -615,8 +647,8 @@ function ensureFeatureStyles() {
         }
         .participants-grid.has-pinned .pinned-card {
             grid-column: 1 / -1;
-            border-color: #4f8cff;
-            box-shadow: 0 0 0 1px rgba(79, 140, 255, 0.55);
+            border-color: #2563eb;
+            box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.45);
         }
 
         /* Fullscreen card */
@@ -680,7 +712,7 @@ function showMeetingNotification(text, opts = {}) {
     toast.textContent = String(text);
 
     if (opts.tone === "warning") {
-        toast.style.borderColor = "rgba(240, 180, 90, 0.6)";
+        toast.style.borderColor = "#f0b45a";
     }
 
     container.appendChild(toast);
@@ -697,6 +729,8 @@ function showMeetingNotification(text, opts = {}) {
         }, 320);
     }, lifetime);
 }
+
+// ---------- REACTIONS MENU (now includes Raise Hand) ----------
 
 function ensureReactionsMenu() {
     let menu = document.getElementById("reactionsMenu");
@@ -719,15 +753,40 @@ function ensureReactionsMenu() {
         menu.appendChild(btn);
     });
 
+    // Divider + Raise Hand / Lower Hand option
+    const sep = document.createElement("div");
+    sep.className = "reaction-sep";
+    menu.appendChild(sep);
+
+    const handBtn = document.createElement("button");
+    handBtn.id = "reactionHandButton";
+    handBtn.type = "button";
+    handBtn.className = "reaction-hand";
+    handBtn.textContent = "Raise Hand";
+    handBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        toggleRaiseHand();
+        toggleReactionsMenu(false);
+    });
+    menu.appendChild(handBtn);
+
     document.body.appendChild(menu);
     return menu;
+}
+
+function updateReactionsHandButton() {
+    const btn = document.getElementById("reactionHandButton");
+    if (!btn) return;
+    const raised = raisedHands.has(liveKitIdentity);
+    btn.classList.toggle("active", raised);
+    btn.textContent = raised ? "Lower Hand" : "Raise Hand";
 }
 
 function positionReactionsMenu(menu) {
     const btn = document.getElementById("reactionsButton");
     if (!btn || !menu) return;
     const rect = btn.getBoundingClientRect();
-    const menuWidth = 6 * 44 + 12;
+    const menuWidth = menu.offsetWidth || (6 * 44 + 20);
     const left = Math.min(
         Math.max(8, rect.left + rect.width / 2 - menuWidth / 2),
         window.innerWidth - menuWidth - 8
@@ -742,45 +801,20 @@ function toggleReactionsMenu(force) {
     const shouldShow = typeof force === "boolean"
         ? force : menu.classList.contains("hidden");
     menu.classList.toggle("hidden", !shouldShow);
-    if (shouldShow) positionReactionsMenu(menu);
+    if (shouldShow) {
+        updateReactionsHandButton();
+        positionReactionsMenu(menu);
+    }
 }
 
-// Wire up the pre-existing toolbar buttons (Hand / Reactions / Share).
-// Keeps the legacy "create if missing" behaviour for safety.
+// Wire up pre-existing toolbar buttons. Hand / Reactions / Share are
+// already present in the new toolbar HTML; we only wire them.
 function ensureExtraControls() {
     const group = document.querySelector(".toolbar-center");
     if (!group) return;
 
-    let handBtn = document.getElementById("handRaiseButton");
-    if (!handBtn) {
-        handBtn = document.createElement("button");
-        handBtn.id = "handRaiseButton";
-        handBtn.type = "button";
-        handBtn.className = "toolbar-btn";
-        handBtn.title = "Raise or lower your hand";
-        handBtn.innerHTML =
-            '<span class="toolbar-icon">✋</span>' +
-            '<span class="toolbar-label">Hand</span>';
-        group.appendChild(handBtn);
-    }
-    if (!handBtn.dataset.wired) {
-        handBtn.dataset.wired = "true";
-        handBtn.addEventListener("click", toggleRaiseHand);
-    }
-
-    let reactBtn = document.getElementById("reactionsButton");
-    if (!reactBtn) {
-        reactBtn = document.createElement("button");
-        reactBtn.id = "reactionsButton";
-        reactBtn.type = "button";
-        reactBtn.className = "toolbar-btn";
-        reactBtn.title = "Send a reaction";
-        reactBtn.innerHTML =
-            '<span class="toolbar-icon">😊</span>' +
-            '<span class="toolbar-label">React</span>';
-        group.appendChild(reactBtn);
-    }
-    if (!reactBtn.dataset.wired) {
+    const reactBtn = document.getElementById("reactionsButton");
+    if (reactBtn && !reactBtn.dataset.wired) {
         reactBtn.dataset.wired = "true";
         reactBtn.addEventListener("click", (ev) => {
             ev.stopPropagation();
@@ -788,19 +822,8 @@ function ensureExtraControls() {
         });
     }
 
-    let shareBtn = document.getElementById("screenShareButton");
-    if (!shareBtn) {
-        shareBtn = document.createElement("button");
-        shareBtn.id = "screenShareButton";
-        shareBtn.type = "button";
-        shareBtn.className = "toolbar-btn";
-        shareBtn.title = "Share your screen";
-        shareBtn.innerHTML =
-            '<span class="toolbar-icon">🖥️</span>' +
-            '<span class="toolbar-label">Share</span>';
-        group.appendChild(shareBtn);
-    }
-    if (!shareBtn.dataset.wired) {
+    const shareBtn = document.getElementById("screenShareButton");
+    if (shareBtn && !shareBtn.dataset.wired) {
         shareBtn.dataset.wired = "true";
         shareBtn.addEventListener("click", toggleScreenShare);
     }
@@ -833,6 +856,7 @@ function positionMoreMenu() {
     );
     menu.style.left = `${left}px`;
     menu.style.bottom = `${window.innerHeight - rect.top + 8}px`;
+    menu.style.top = "";
 }
 
 function toggleMoreMenu(force) {
@@ -851,12 +875,6 @@ function handleMoreMenuAction(action) {
             break;
         case "copy-id":
             copyMeetingIdToClipboard();
-            break;
-        case "captions":
-            showMeetingNotification("💬 Captions coming soon");
-            break;
-        case "settings":
-            showMeetingNotification("⚙️ Settings coming soon");
             break;
         default:
             break;
@@ -912,16 +930,6 @@ function applyDrawingControlUI() {
         if (t) t.textContent = drawingToolEnabled ? "ON" : "OFF";
     }
 
-    const eraserBtn = document.getElementById("eraserToggle");
-    if (eraserBtn) {
-        eraserBtn.classList.toggle("on", eraserEnabled);
-        eraserBtn.setAttribute(
-            "aria-pressed", eraserEnabled ? "true" : "false"
-        );
-        const t = eraserBtn.querySelector(".switch-text");
-        if (t) t.textContent = eraserEnabled ? "ON" : "OFF";
-    }
-
     document.querySelectorAll("#colorSwatches .color-swatch")
         .forEach((swatch) => {
             swatch.classList.toggle(
@@ -949,16 +957,8 @@ function setDrawToolEnabled(enabled) {
     applyDrawingControlUI();
 }
 
-function setEraserEnabled(enabled) {
-    eraserEnabled = Boolean(enabled);
-    resetDrawingState();
-    applyDrawingControlUI();
-}
-
 function setDrawingColor(color) {
     if (typeof color === "string" && color) drawingColor = color;
-    // Choosing a colour naturally leaves eraser mode.
-    eraserEnabled = false;
     applyDrawingControlUI();
 }
 
@@ -974,26 +974,6 @@ function toggleDrawPanel(force) {
     const shouldShow = typeof force === "boolean"
         ? force : panel.classList.contains("hidden");
     panel.classList.toggle("hidden", !shouldShow);
-    if (shouldShow) {
-        const fab = document.getElementById("drawToggleButton");
-        const p = document.getElementById("drawPanel");
-        if (fab && p) {
-            const rect = fab.getBoundingClientRect();
-            const panelW = p.offsetWidth || 288;
-            const left = Math.min(
-                Math.max(8, rect.right - panelW),
-                window.innerWidth - panelW - 8
-            );
-            p.style.left = "auto";
-            p.style.right = "16px";
-            if (window.innerWidth < 640) {
-                p.style.left = "10px";
-                p.style.right = "10px";
-            } else if (left !== rect.right - panelW) {
-                // keep default right-anchored placement on desktop
-            }
-        }
-    }
 }
 
 function closeDrawPanel() {
@@ -1011,9 +991,17 @@ function initDrawingControls() {
     }
     panel.dataset.wired = "true";
 
+    // The FAB does two things:
+    //   • If the user has drawing permission → open the drawing popover.
+    //   • Otherwise → send a "Request to Draw" to the host.
     toggleBtn.addEventListener("click", (event) => {
         event.stopPropagation();
-        toggleDrawPanel();
+        const canDraw = isMeetingCreator || canvasEnabled;
+        if (canDraw) {
+            toggleDrawPanel();
+        } else {
+            requestDrawingPermission();
+        }
     });
 
     document.getElementById("drawPanelClose")
@@ -1022,11 +1010,6 @@ function initDrawingControls() {
     document.getElementById("drawOnOff")
         ?.addEventListener("click", () => {
             setDrawToolEnabled(!drawingToolEnabled);
-        });
-
-    document.getElementById("eraserToggle")
-        ?.addEventListener("click", () => {
-            setEraserEnabled(!eraserEnabled);
         });
 
     const eraserRange = document.getElementById("eraserSizeRange");
@@ -1070,6 +1053,251 @@ function initDrawingControls() {
 
     applyDrawingControlUI();
 }
+
+// ============================================================
+// DRAWING PERMISSION REQUEST FLOW
+// ============================================================
+
+function requestDrawingPermission() {
+    if (isMeetingCreator || canvasEnabled) return;
+    if (drawingPermissionRequested) {
+        showMeetingNotification("✋ Request already sent to the host");
+        return;
+    }
+    sendWS({
+        type: "request_drawing",
+        meeting_id: meetingId,
+        user_id: userId,
+        user_name: userName,
+        livekit_identity: liveKitIdentity
+    });
+    drawingPermissionRequested = true;
+    showMeetingNotification("✋ Drawing permission requested");
+    updateRequestDrawUI();
+}
+
+function updateRequestDrawUI() {
+    const fab = document.getElementById("drawToggleButton");
+    if (!fab) return;
+    const canDraw = isMeetingCreator || canvasEnabled;
+    const icon = fab.querySelector(".draw-fab-icon");
+
+    fab.classList.remove("fab-canvas", "fab-request", "fab-pending");
+
+    if (canDraw) {
+        fab.classList.add("fab-canvas");
+        fab.title = "Air Canvas";
+        fab.setAttribute("aria-label", "Open Air Canvas drawing tools");
+        if (icon) icon.textContent = "🎨";
+    } else if (drawingPermissionRequested) {
+        fab.classList.add("fab-pending");
+        fab.title = "Waiting for host approval";
+        fab.setAttribute("aria-label", "Waiting for host approval");
+        if (icon) icon.textContent = "⏳";
+    } else {
+        fab.classList.add("fab-request");
+        fab.title = "Request drawing permission";
+        fab.setAttribute("aria-label", "Request to draw");
+        if (icon) icon.textContent = "✋";
+    }
+}
+
+// ============================================================
+// DRAWING PERMISSIONS POPOVER (HOST ONLY)
+// ============================================================
+
+function positionDrawingPermissionsPopover() {
+    const pop = document.getElementById("drawingPermissionsPopover");
+    const btn = document.getElementById("drawingPermissionsButton");
+    if (!pop || !btn) return;
+    const rect = btn.getBoundingClientRect();
+    const popW = pop.offsetWidth || 300;
+    const left = Math.min(
+        Math.max(8, rect.left + rect.width / 2 - popW / 2),
+        window.innerWidth - popW - 8
+    );
+    pop.style.left = `${left}px`;
+    pop.style.bottom = `${window.innerHeight - rect.top + 8}px`;
+    pop.style.top = "";
+}
+
+function toggleDrawingPermissionsPopover(force) {
+    const pop = document.getElementById("drawingPermissionsPopover");
+    if (!pop) return;
+    const shouldShow = typeof force === "boolean"
+        ? force : pop.classList.contains("hidden");
+    pop.classList.toggle("hidden", !shouldShow);
+    if (shouldShow) {
+        renderDrawingPermissions();
+        positionDrawingPermissionsPopover();
+    }
+}
+
+function initDrawingPermissionsPopover() {
+    const btn = document.getElementById("drawingPermissionsButton");
+    const pop = document.getElementById("drawingPermissionsPopover");
+    if (!btn || !pop) return;
+    if (btn.dataset.wired) return;
+    btn.dataset.wired = "true";
+
+    btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        toggleDrawingPermissionsPopover();
+    });
+
+    document.getElementById("drawingPermissionsClose")
+        ?.addEventListener("click", () => {
+            toggleDrawingPermissionsPopover(false);
+        });
+
+    if (!window.__airCanvasPermsOutsideClickBound) {
+        window.__airCanvasPermsOutsideClickBound = true;
+        document.addEventListener("click", (ev) => {
+            const p = document.getElementById("drawingPermissionsPopover");
+            if (!p || p.classList.contains("hidden")) return;
+            if (p.contains(ev.target)) return;
+            if (ev.target.closest &&
+                ev.target.closest("#drawingPermissionsButton")) return;
+            toggleDrawingPermissionsPopover(false);
+        });
+    }
+}
+
+// Renders content into the host-only popover. Safe to call at any time.
+function renderDrawingPermissions() {
+    const content = document.getElementById("drawingPermissionsContent");
+    if (!content) return;
+
+    // Show the toolbar button only to the host.
+    const hostBtn = document.getElementById("drawingPermissionsButton");
+    if (hostBtn) {
+        hostBtn.classList.toggle("hidden-control", !isMeetingCreator);
+    }
+
+    if (!isMeetingCreator) {
+        content.innerHTML = "";
+        return;
+    }
+
+    content.innerHTML = "";
+
+    const guests = [...participantInfo.entries()].filter(
+        ([, info]) => !info.isCreator
+    );
+
+    const approvedGuests = guests.filter(([, info]) =>
+        Boolean(info.canvasEnabled)
+    );
+    const requestGuests = guests.filter(([id]) =>
+        drawingPermissionRequests.has(String(id))
+    );
+
+    // ----- Requests -----
+    const reqTitle = document.createElement("div");
+    reqTitle.className = "perm-section-title";
+    reqTitle.textContent = `Requests (${requestGuests.length})`;
+    content.appendChild(reqTitle);
+
+    if (!requestGuests.length) {
+        const empty = document.createElement("div");
+        empty.className = "perm-empty";
+        empty.textContent = "No pending requests";
+        content.appendChild(empty);
+    } else {
+        requestGuests.forEach(([id, info]) => {
+            const row = document.createElement("div");
+            row.className = "perm-row";
+
+            const name = document.createElement("span");
+            name.className = "perm-name";
+            name.textContent = info.name || "Participant";
+
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "perm-action perm-action-approve";
+            btn.textContent = "Approve";
+            btn.disabled = approvedGuests.length >= MAX_GUEST_DRAWERS;
+            btn.title = btn.disabled
+                ? `Only ${MAX_GUEST_DRAWERS} guest participants can draw at once`
+                : "Approve drawing permission";
+
+            const targetIdentity = String(
+                info.livekitIdentity ||
+                    userIdToLiveKitIdentity.get(String(id)) ||
+                    id
+            );
+
+            btn.addEventListener("click", () => {
+                sendWS({
+                    type: "grant_drawing",
+                    target_user_id: targetIdentity,
+                    target_livekit_identity: targetIdentity,
+                    target_user_name: info.name || "Participant"
+                });
+                info.canvasEnabled = true;
+                drawingPermissionRequests.delete(String(id));
+                participantInfo.set(String(id), info);
+                renderDrawingPermissions();
+            });
+
+            row.append(name, btn);
+            content.appendChild(row);
+        });
+    }
+
+    // ----- Approved -----
+    const appTitle = document.createElement("div");
+    appTitle.className = "perm-section-title";
+    appTitle.textContent =
+        `Approved (${approvedGuests.length}/${MAX_GUEST_DRAWERS})`;
+    content.appendChild(appTitle);
+
+    if (!approvedGuests.length) {
+        const empty = document.createElement("div");
+        empty.className = "perm-empty";
+        empty.textContent = "No guests have drawing permission";
+        content.appendChild(empty);
+    } else {
+        approvedGuests.forEach(([id, info]) => {
+            const row = document.createElement("div");
+            row.className = "perm-row";
+
+            const name = document.createElement("span");
+            name.className = "perm-name";
+            name.textContent = info.name || "Participant";
+
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "perm-action perm-action-remove";
+            btn.textContent = "Remove";
+
+            const targetIdentity = String(
+                info.livekitIdentity ||
+                    userIdToLiveKitIdentity.get(String(id)) ||
+                    id
+            );
+
+            btn.addEventListener("click", () => {
+                // Only revokes drawing — video, tracks and side panels
+                // are NEVER touched.
+                sendWS({
+                    type: "revoke_drawing",
+                    target_user_id: targetIdentity,
+                    target_livekit_identity: targetIdentity,
+                    target_user_name: info.name || "Participant"
+                });
+                info.canvasEnabled = false;
+                drawingPermissionRequests.delete(String(id));
+                participantInfo.set(String(id), info);
+                renderDrawingPermissions();
+            });
+
+            row.append(name, btn);
+            content.appendChild(row);
+        });
+    }
+}
+
 
 // ============================================================
 // PIN / FIT-TO-SCREEN / CARD CONTROLS
@@ -1239,7 +1467,7 @@ function setupLocalCardControls() {
 }
 
 // ============================================================
-// HAND RAISE
+// HAND RAISE  (now triggered from inside the Reactions menu)
 // ============================================================
 
 function toggleRaiseHand() {
@@ -1250,6 +1478,7 @@ function toggleRaiseHand() {
     else raisedHands.delete(liveKitIdentity);
 
     updateHandRaiseButton();
+    updateReactionsHandButton();
     updateLocalUI();
     renderParticipantsList();
 
@@ -1261,6 +1490,8 @@ function toggleRaiseHand() {
 }
 
 function updateHandRaiseButton() {
+    // No standalone toolbar button any more — raise hand lives in the
+    // reactions menu. Keep the function so other callers stay safe.
     const btn = document.getElementById("handRaiseButton");
     if (!btn) return;
     const raised = raisedHands.has(liveKitIdentity);
@@ -1328,7 +1559,7 @@ function sendReaction(emoji) {
 }
 
 // ============================================================
-// SCREEN SHARING
+// SCREEN SHARING  (UNCHANGED)
 // ============================================================
 
 function isScreenShareTrack(track, publication) {
@@ -1477,199 +1708,29 @@ function updateCanvasAvailability() {
     if (clearCanvasBtn) {
         clearCanvasBtn.disabled = !canClear;
         clearCanvasBtn.style.opacity = canClear ? "1" : "0.45";
-        clearCanvasBtn.title = canClear
-            ? "Clear your canvas"
-            : "You have nothing to clear.";
     }
 
-    // Gesture / Confidence UI is gone — these guards keep the
-    // (now-null) references safe.
+    // Gesture / Confidence UI is gone — these guards keep (now-null)
+    // references safe.
     if (gestureDisplay && !canDraw) gestureDisplay.textContent = "VIEW ONLY";
     if (confidenceDisplay && !canDraw) confidenceDisplay.textContent = "--";
 
-    // Show the Air Canvas button only when the user may draw.
-    const drawBtn = document.getElementById("drawToggleButton");
-    if (drawBtn) drawBtn.classList.toggle("hidden-control", !canDraw);
-
+    // If we lost drawing permission, close the popover and disable.
     if (!canDraw) {
         if (drawingToolEnabled) setDrawToolEnabled(false);
         closeDrawPanel();
     }
 
+    // FAB behaves as Canvas or Request button depending on permission.
+    updateRequestDrawUI();
+
+    // Show / hide the host-only permissions toolbar button.
+    const hostBtn = document.getElementById("drawingPermissionsButton");
+    if (hostBtn) {
+        hostBtn.classList.toggle("hidden-control", !isMeetingCreator);
+    }
+
     renderDrawingPermissions();
-    renderDrawingPermissionRequest();
-}
-
-function renderDrawingPermissionRequest() {
-    if (!meetingMain) return;
-    const panel = document.getElementById("drawingPermissionRequestPanel");
-    if (panel) panel.remove();
-}
-
-function renderDrawingPermissions() {
-    if (!meetingMain) return;
-
-    if (!isMeetingCreator) {
-        if (drawingPermissionsPanel) {
-            drawingPermissionsPanel.remove();
-            drawingPermissionsPanel = null;
-        }
-        return;
-    }
-
-    if (!drawingPermissionsPanel) {
-        drawingPermissionsPanel = document.createElement("div");
-        drawingPermissionsPanel.id = "drawingPermissionsPanel";
-        drawingPermissionsPanel.style.margin = "16px 0";
-        drawingPermissionsPanel.style.padding = "16px";
-        drawingPermissionsPanel.style.borderRadius = "12px";
-        drawingPermissionsPanel.style.background = "rgba(255,255,255,0.06)";
-        drawingPermissionsPanel.style.border =
-            "1px solid rgba(255,255,255,0.12)";
-        meetingMain.appendChild(drawingPermissionsPanel);
-    }
-
-    const guests = [...participantInfo.entries()].filter(
-        ([, info]) => !info.isCreator
-    );
-
-    const activeGuestDrawers = guests.filter(([, info]) =>
-        Boolean(info.canvasEnabled)
-    ).length;
-
-    drawingPermissionsPanel.innerHTML = "";
-
-    const title = document.createElement("div");
-    title.style.fontWeight = "700";
-    title.style.marginBottom = "4px";
-    title.textContent = "🎨 Drawing Permissions";
-
-    const subtitle = document.createElement("div");
-    subtitle.style.fontSize = "13px";
-    subtitle.style.opacity = "0.75";
-    subtitle.style.marginBottom = "12px";
-    subtitle.textContent =
-        `You can draw. Choose up to ${MAX_GUEST_DRAWERS} participants who can also draw. ` +
-        `${activeGuestDrawers}/${MAX_GUEST_DRAWERS} guest slots used.`;
-
-    drawingPermissionsPanel.append(title, subtitle);
-
-    if (!guests.length) {
-        const empty = document.createElement("div");
-        empty.style.opacity = "0.7";
-        empty.textContent = "No other participants have joined yet.";
-        drawingPermissionsPanel.appendChild(empty);
-        return;
-    }
-
-    const list = document.createElement("div");
-    list.style.display = "flex";
-    list.style.flexDirection = "column";
-    list.style.gap = "8px";
-    list.style.maxHeight = "260px";
-    list.style.overflowY = "auto";
-
-    guests.forEach(([id, info]) => {
-        const row = document.createElement("div");
-        row.style.display = "flex";
-        row.style.alignItems = "center";
-        row.style.justifyContent = "space-between";
-        row.style.gap = "10px";
-        row.style.padding = "8px 10px";
-        row.style.borderRadius = "8px";
-        row.style.background = "rgba(255,255,255,0.04)";
-
-        const name = document.createElement("span");
-        name.textContent = info.name || "Participant";
-
-        const button = document.createElement("button");
-        button.type = "button";
-        button.style.cursor = "pointer";
-        button.style.padding = "7px 10px";
-        button.style.border = "0";
-        button.style.borderRadius = "7px";
-
-        const targetIdentity = String(
-            info.livekitIdentity ||
-                userIdToLiveKitIdentity.get(String(id)) ||
-                id
-        );
-
-        if (info.canvasEnabled) {
-            button.textContent = "Remove Drawing";
-            button.onclick = () => {
-                sendWS({
-                    type: "revoke_drawing",
-                    target_user_id: targetIdentity,
-                    target_livekit_identity: targetIdentity,
-                    target_user_name: info.name || "Participant"
-                });
-                info.canvasEnabled = false;
-                drawingPermissionRequests.delete(String(id));
-                participantInfo.set(String(id), info);
-                renderDrawingPermissions();
-            };
-        } else if (drawingPermissionRequests.has(id)) {
-            button.textContent = "Approve Drawing";
-            button.disabled = activeGuestDrawers >= MAX_GUEST_DRAWERS;
-            button.title = button.disabled
-                ? `Only ${MAX_GUEST_DRAWERS} guest participants can draw at once.`
-                : "Approve this participant's drawing request";
-            button.onclick = () => {
-                sendWS({
-                    type: "grant_drawing",
-                    target_user_id: targetIdentity,
-                    target_livekit_identity: targetIdentity,
-                    target_user_name: info.name || "Participant"
-                });
-                info.canvasEnabled = true;
-                drawingPermissionRequests.delete(String(id));
-                participantInfo.set(String(id), info);
-                renderDrawingPermissions();
-            };
-        } else {
-            button.textContent = "Give Drawing";
-            button.disabled = activeGuestDrawers >= MAX_GUEST_DRAWERS;
-            button.title = button.disabled
-                ? `Only ${MAX_GUEST_DRAWERS} guest participants can draw at once.`
-                : "Give this participant drawing permission";
-            button.onclick = () => {
-                sendWS({
-                    type: "grant_drawing",
-                    target_user_id: targetIdentity,
-                    target_livekit_identity: targetIdentity,
-                    target_user_name: info.name || "Participant"
-                });
-                info.canvasEnabled = true;
-                drawingPermissionRequests.delete(String(id));
-                participantInfo.set(String(id), info);
-                renderDrawingPermissions();
-            };
-        }
-
-        row.append(name, button);
-        list.appendChild(row);
-    });
-
-    drawingPermissionsPanel.appendChild(list);
-}
-
-function updateLocalUI() {
-    if (localParticipantLabel) {
-        const raised = raisedHands.has(liveKitIdentity);
-        localParticipantLabel.textContent =
-            (userName || "You") + (raised ? " ✋" : "");
-    }
-}
-
-function showHome() {
-    if (homeScreen) homeScreen.classList.remove("hidden");
-    if (meetingScreen) meetingScreen.classList.add("hidden");
-}
-
-function showMeeting() {
-    if (homeScreen) homeScreen.classList.add("hidden");
-    if (meetingScreen) meetingScreen.classList.remove("hidden");
 }
 
 // ============================================================
@@ -2090,7 +2151,7 @@ async function startLocalMedia() {
 
     if (cameraStatus) {
         cameraStatus.textContent = "✅ Camera & Mic On";
-        cameraStatus.style.color = "#4caf50";
+        cameraStatus.style.color = "#16a34a";
     }
     if (homeStartCamera) {
         homeStartCamera.textContent = "✅ Camera Started";
@@ -2119,7 +2180,7 @@ async function startCameraFromHome() {
         console.error("❌ Camera/Microphone error:", error);
         if (cameraStatus) {
             cameraStatus.textContent = "❌ Camera/Microphone access denied";
-            cameraStatus.style.color = "#f44336";
+            cameraStatus.style.color = "#dc2626";
         }
         if (homeStartCamera) {
             homeStartCamera.disabled = false;
@@ -2152,7 +2213,7 @@ function stopLocalMedia() {
 }
 
 // ============================================================
-// MEDIAPIPE  (UNCHANGED)
+// MEDIAPIPE  (UNCHANGED apart from the removed eraser toggle)
 // ============================================================
 
 function initMediaPipe() {
@@ -2237,7 +2298,7 @@ function onResults(results) {
 
         if (typeof HAND_CONNECTIONS !== "undefined" &&
             Array.isArray(HAND_CONNECTIONS)) {
-            ctx.strokeStyle = "#00FF00";
+            ctx.strokeStyle = "#2563eb";
             ctx.lineWidth = 2;
             ctx.beginPath();
 
@@ -2250,7 +2311,7 @@ function onResults(results) {
             ctx.stroke();
         }
 
-        ctx.fillStyle = "#FF0000";
+        ctx.fillStyle = "#dc2626";
         for (const lm of landmarks) {
             const p = landmarkToCanvasPixel(lm.x, lm.y);
             ctx.beginPath();
@@ -2263,12 +2324,13 @@ function onResults(results) {
     for (const point of landmarks) values.push(point.x, point.y);
 
     // Drawing happens only when the DRAW switch is ON.
-    // The gesture pipeline itself is untouched.
+    // The "erase" path still works — the gesture pipeline decides
+    // when the erase gesture is being made. The user just adjusts
+    // the eraser size in the popover.
     if (!drawingToolEnabled) {
         resetDrawingState();
     } else if (activeGesture === "draw") {
-        if (eraserEnabled) eraseGesture(values);
-        else drawGesture(values);
+        drawGesture(values);
     } else if (activeGesture === "erase") {
         eraseGesture(values);
     } else {
@@ -2335,7 +2397,7 @@ function updateGestureDisplay(gesture, confidence) {
     activeGesture = gesture || "no_gesture";
     activeConfidence = Number(confidence) || 0;
 
-    // Gesture/Confidence UI removed — keep the (now-null) refs safe.
+    // Gesture / Confidence UI removed — keep (now-null) refs safe.
     if (gestureDisplay) {
         gestureDisplay.textContent = activeGesture === "no_gesture"
             ? "NO GESTURE" : activeGesture.toUpperCase();
@@ -2357,7 +2419,7 @@ function resetDrawingState() {
 }
 
 // ============================================================
-// LOCAL DRAWING  (coordinates unchanged, colours/sizes now driven by UI)
+// LOCAL DRAWING  (coordinates unchanged; colour / size driven by UI)
 // ============================================================
 
 function drawGesture(values) {
@@ -2624,7 +2686,7 @@ function sendDrawingHistoryTo(targetIdentity) {
 }
 
 // ============================================================
-// REMOTE DRAWING  (X-flip unchanged; colour/width are optional)
+// REMOTE DRAWING  (X-flip unchanged; colour/width optional)
 // ============================================================
 
 function resolveRemoteIdentity(data) {
@@ -2934,9 +2996,26 @@ function handleWebSocketMessage(data) {
             break;
         }
 
+        // -------- Request to Draw (host receives) --------
         case "request_drawing":
-        case "drawing_permission_request":
+        case "drawing_permission_request": {
+            if (!isMeetingCreator) break;
+            const requesterId = String(
+                data.livekit_identity || data.user_id || ""
+            );
+            if (!requesterId || requesterId === String(liveKitIdentity)) break;
+
+            drawingPermissionRequests.add(requesterId);
+
+            const name =
+                data.user_name ||
+                participantInfo.get(requesterId)?.name ||
+                "A participant";
+
+            showMeetingNotification(`✋ ${name} requested to draw`);
+            renderDrawingPermissions();
             break;
+        }
 
         case "drawing_permission_denied":
             console.log("🚫 Drawing permission unavailable:", data.message || "");
@@ -2970,6 +3049,7 @@ function handleWebSocketMessage(data) {
 
             if (id === String(userId) || id === String(liveKitIdentity)) {
                 canvasEnabled = permissionEnabled;
+                drawingPermissionRequested = false;
                 if (canvasEnabled) {
                     if (!mediaPipeStarted) initMediaPipe();
                 } else {
@@ -2980,11 +3060,6 @@ function handleWebSocketMessage(data) {
             } else {
                 renderDrawingPermissions();
             }
-            console.log(
-                `🎨 Drawing permission for ${existing.name}: ${
-                    existing.canvasEnabled ? "ENABLED" : "DISABLED"
-                }`
-            );
             break;
         }
 
@@ -3012,16 +3087,16 @@ function handleWebSocketMessage(data) {
             if (isMeetingCreator) drawingPermissionRequests.delete(id);
 
             if (id === String(userId) || id === String(liveKitIdentity)) {
+                // Only revoke DRAWING permission. Video / mic / tracks
+                // and side panels are NEVER touched here.
                 canvasEnabled = false;
+                drawingPermissionRequested = false;
                 if (landmarkCanvas) clearCanvasElement(landmarkCanvas);
                 resetDrawingState();
                 updateCanvasAvailability();
             } else {
                 renderDrawingPermissions();
             }
-            console.log(
-                `🎨 Drawing permission for ${existing.name}: DISABLED (revoked)`
-            );
             break;
         }
 
@@ -3117,10 +3192,10 @@ function handleWebSocketMessage(data) {
 
             if (raised) {
                 raisedHands.add(senderId);
-                showMeetingNotification(`✋ ${name} raised their hand`);
+                showMeetingNotification(`✋ ${name} raised hand`);
             } else {
                 raisedHands.delete(senderId);
-                showMeetingNotification(`${name} lowered their hand`);
+                showMeetingNotification(`${name} lowered hand`);
             }
 
             const tile = remoteParticipants.get(senderId);
@@ -3581,20 +3656,18 @@ async function cleanupMeeting(stopCameraToo = true) {
     meetingId = null;
     isMeetingCreator = false;
     canvasEnabled = false;
-
-    if (drawingPermissionsPanel) {
-        drawingPermissionsPanel.remove();
-        drawingPermissionsPanel = null;
-    }
+    drawingPermissionRequested = false;
 
     participantInfo.clear();
     userIdToLiveKitIdentity.clear();
     liveKitIdentityToUserId.clear();
     raisedHands.clear();
+    drawingPermissionRequests.clear();
 
     // Close the popovers and turn the drawing tool OFF.
     closeDrawPanel();
     toggleMoreMenu(false);
+    toggleDrawingPermissionsPopover(false);
     if (drawingToolEnabled) setDrawToolEnabled(false);
 
     activeGesture = "no_gesture";
@@ -3604,6 +3677,7 @@ async function cleanupMeeting(stopCameraToo = true) {
     updateGestureDisplay("no_gesture", 0);
     updateParticipantCount();
     updateHandRaiseButton();
+    updateRequestDrawUI();
     updateLocalUI();
     toggleReactionsMenu(false);
 
@@ -3679,6 +3753,14 @@ window.addEventListener("resize", () => {
     if (moreMenu && !moreMenu.classList.contains("hidden")) {
         positionMoreMenu();
     }
+    const perms = document.getElementById("drawingPermissionsPopover");
+    if (perms && !perms.classList.contains("hidden")) {
+        positionDrawingPermissionsPopover();
+    }
+    const reactions = document.getElementById("reactionsMenu");
+    if (reactions && !reactions.classList.contains("hidden")) {
+        positionReactionsMenu(reactions);
+    }
 });
 
 document.addEventListener("fullscreenchange", handleFullscreenChange);
@@ -3701,6 +3783,7 @@ function initializeApplication() {
     ensureExtraControls();
     initMoreMenu();
     initDrawingControls();
+    initDrawingPermissionsPopover();
     ensureNotificationsContainer();
     updateLocalUI();
     setupCanvasSizes();
@@ -3709,6 +3792,7 @@ function initializeApplication() {
     updateParticipantCount();
     updateCanvasAvailability();
     updateHandRaiseButton();
+    updateRequestDrawUI();
     updateScreenShareUI();
     setConnectionStatus("Disconnected");
 
