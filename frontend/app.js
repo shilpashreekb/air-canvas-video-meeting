@@ -448,8 +448,6 @@ function setLocalCameraOffUI(off) {
     if (localCard) {
         localCard.classList.toggle("camera-off", Boolean(off));
     }
-    // Overlay visibility is driven purely by the parent card class now.
-    // Keep the null-guard in case the element is missing in a stale build.
     if (cameraOffOverlay) {
         cameraOffOverlay.classList.toggle("hidden", false);
     }
@@ -492,7 +490,6 @@ function applyPagination() {
 
     const allCards = [...participantsGrid.querySelectorAll(".participant-card")];
 
-    // ---------- PINNED MODE ----------
     if (pinnedIdentity) {
         const pinnedCard = allCards.find(
             (c) => String(c.dataset.identity || "") === pinnedIdentity
@@ -547,7 +544,6 @@ function applyPagination() {
         return;
     }
 
-    // ---------- NORMAL MODE (nothing pinned) ----------
     const perPage = getPerPage();
     const totalPages = Math.max(1, Math.ceil(allCards.length / perPage));
 
@@ -566,7 +562,6 @@ function applyPagination() {
 
     allCards.forEach((c) => c.classList.remove("grid-span-2"));
 
-    // Desktop 3-tile case: last visible card spans full width.
     const isDesktop = window.innerWidth > 640;
     if (isDesktop && visibleCount === 3) {
         const visible = allCards.slice(start, end);
@@ -659,6 +654,13 @@ function initTheme() {
 
 // ============================================================
 // HOST-ONLY CONTROLS
+//
+// The End Meeting button is host-only.
+//
+// The Draw Access button ("drawingPermissionsButton") is host-only on
+// desktop. On MOBILE we also surface it to non-host users who still
+// need to request drawing access, since we removed the floating
+// "Ask permission to draw" FAB there.
 // ============================================================
 
 function updateHostOnlyControls() {
@@ -666,9 +668,14 @@ function updateHostOnlyControls() {
     if (endBtn) {
         endBtn.classList.toggle("hidden-control", !isMeetingCreator);
     }
+
     const permBtn = document.getElementById("drawingPermissionsButton");
     if (permBtn) {
-        permBtn.classList.toggle("hidden-control", !isMeetingCreator);
+        const isMobile = window.innerWidth <= 640;
+        const showForNonHostMobile =
+            isMobile && !isMeetingCreator && !canvasEnabled;
+        const shouldShow = isMeetingCreator || showForNonHostMobile;
+        permBtn.classList.toggle("hidden-control", !shouldShow);
     }
 }
 
@@ -853,7 +860,6 @@ function ensureFeatureStyles() {
             color: var(--accent) !important;
         }
 
-        /* Pin / Fit / Restore — anchored to the BOTTOM-RIGHT of each tile. */
         .participant-card .card-controls {
             position: absolute;
             top: auto;
@@ -1347,7 +1353,11 @@ function updateRequestDrawUI() {
 }
 
 // ============================================================
-// DRAWING PERMISSIONS POPOVER (HOST ONLY)
+// DRAWING PERMISSIONS POPOVER
+//
+// Host: shows the drawing permission list (unchanged).
+// Non-host (mobile only, via Draw Access button): shows an
+// "Ask permission to draw" action.
 // ============================================================
 
 function positionDrawingPermissionsPopover() {
@@ -1411,16 +1421,72 @@ function renderDrawingPermissions() {
     const content = document.getElementById("drawingPermissionsContent");
     if (!content) return;
 
+    const titleEl = document.querySelector(
+        "#drawingPermissionsPopover .popover-title"
+    );
+
+    // ---- Toolbar button visibility ----
     const hostBtn = document.getElementById("drawingPermissionsButton");
     if (hostBtn) {
-        hostBtn.classList.toggle("hidden-control", !isMeetingCreator);
+        const isMobile = window.innerWidth <= 640;
+        const showForNonHostMobile =
+            isMobile && !isMeetingCreator && !canvasEnabled;
+        const shouldShow = isMeetingCreator || showForNonHostMobile;
+        hostBtn.classList.toggle("hidden-control", !shouldShow);
     }
 
+    // ============================================================
+    // NON-HOST PATH: "Ask permission to draw"
+    // ============================================================
     if (!isMeetingCreator) {
+        if (titleEl) titleEl.textContent = "🎨 Air Canvas Access";
         content.innerHTML = "";
+
+        if (canvasEnabled) {
+            const msg = document.createElement("div");
+            msg.className = "perm-empty";
+            msg.textContent =
+                "You have drawing permission. Use the canvas button to draw.";
+            content.appendChild(msg);
+            return;
+        }
+
+        if (drawingPermissionRequested) {
+            const msg = document.createElement("div");
+            msg.className = "perm-empty";
+            msg.textContent =
+                "Request sent. Waiting for the host to approve…";
+            content.appendChild(msg);
+            return;
+        }
+
+        const row = document.createElement("div");
+        row.className = "perm-row";
+
+        const name = document.createElement("span");
+        name.className = "perm-name";
+        name.textContent = "Ask permission to draw";
+
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "perm-action perm-action-approve";
+        btn.textContent = "Request";
+        btn.title = "Send a drawing request to the host";
+
+        btn.addEventListener("click", () => {
+            requestDrawingPermission();
+            setTimeout(() => toggleDrawingPermissionsPopover(false), 350);
+        });
+
+        row.append(name, btn);
+        content.appendChild(row);
         return;
     }
 
+    // ============================================================
+    // HOST PATH (unchanged)
+    // ============================================================
+    if (titleEl) titleEl.textContent = "🎨 Drawing Permissions";
     content.innerHTML = "";
 
     const guests = [...participantInfo.entries()].filter(
@@ -2101,7 +2167,6 @@ function getVideoCoverTransform() {
     const vh = video.videoHeight;
     if (!cw || !ch || !vw || !vh) return null;
 
-    // Matches CSS object-fit: contain on the video element.
     const scale = Math.min(cw / vw, ch / vh);
     const dispW = vw * scale;
     const dispH = vh * scale;
@@ -2250,7 +2315,6 @@ function createRemoteTile(participant) {
 
     remoteParticipants.set(identity, tile);
 
-    // Default to camera-off until we observe a live camera publication.
     card.classList.add("camera-off");
 
     addCardControls(card, identity);
@@ -2270,14 +2334,11 @@ function createRemoteTile(participant) {
     updateParticipantCount();
     applyPagination();
 
-    // Reconcile against any video publication already present.
     refreshRemoteCameraState(identity, participant);
 
     return tile;
 }
 
-// Derives the correct .camera-off state purely from actual
-// video publications on the given participant.
 function refreshRemoteCameraState(identity, participant) {
     const tile = remoteParticipants.get(String(identity));
     if (!tile || !participant) return;
@@ -3306,6 +3367,7 @@ function handleWebSocketMessage(data) {
 
             drawingPermissionRequested = false;
             updateRequestDrawUI();
+            updateHostOnlyControls();
             showMeetingNotification("🚫 Drawing request declined");
             console.log("🚫 Drawing permission unavailable:",
                 data.message || "");
@@ -3655,7 +3717,6 @@ async function connectLiveKit() {
         }
     );
 
-    // Reflect remote camera mute/unmute on their tiles.
     const handleRemoteVideoMuteChange = (publication, participant, muted) => {
         try {
             const identity = String(participant?.identity || "");
@@ -3770,7 +3831,6 @@ async function connectLiveKit() {
         upsertLiveKitParticipant(participant, false);
     });
 
-    // Reconcile camera state for all existing remote participants.
     liveKitRoom.remoteParticipants.forEach((participant) => {
         refreshRemoteCameraState(String(participant.identity), participant);
     });
@@ -3961,7 +4021,6 @@ async function toggleCamera() {
         catch (error) { console.warn("⚠️ LiveKit camera toggle:", error); }
     }
 
-    // Reflect the camera-off state on the local user's own tile.
     setLocalCameraOffUI(isCameraOff);
 
     if (cameraButton) {
@@ -4163,6 +4222,9 @@ meetingIdInput?.addEventListener("keydown", (event) => {
 let __resizeTimer = null;
 window.addEventListener("resize", () => {
     setupCanvasSizes();
+
+    // Recompute mobile/desktop visibility for the Draw Access button.
+    updateHostOnlyControls();
 
     const moreMenu = document.getElementById("moreMenu");
     if (moreMenu && !moreMenu.classList.contains("hidden")) positionMoreMenu();
