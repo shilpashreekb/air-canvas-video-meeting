@@ -495,7 +495,7 @@ function updateCanvasAvailability() {
 }
 
 // ------------------------------------------------------------
-// FIX 2: Participant-side "Request Drawing" UI has been removed.
+// Participant-side "Request Drawing" UI has been removed.
 // Participants can no longer request drawing permission themselves.
 // The host alone grants / revokes drawing permission directly.
 // ------------------------------------------------------------
@@ -596,12 +596,7 @@ function renderDrawingPermissions() {
         );
 
         if (info.canvasEnabled) {
-            // --------------------------------------------------------
-            // FIX 3: Remove Drawing.
-            //  1) Send revoke_drawing to the target participant.
-            //  2) Immediately update host-side local state so the
-            //     button flips back to "Give Drawing".
-            // --------------------------------------------------------
+            // Remove Drawing: send revoke + immediately update host UI.
             button.textContent = "Remove Drawing";
             button.onclick = () => {
                 sendWS({
@@ -617,9 +612,6 @@ function renderDrawingPermissions() {
                 renderDrawingPermissions();
             };
         } else if (drawingPermissionRequests.has(id)) {
-            // (Request-based approve path is no longer reachable because
-            // participants no longer send request_drawing messages. Kept
-            // for backwards compatibility only.)
             button.textContent = "Approve Drawing";
             button.disabled = activeGuestDrawers >= MAX_GUEST_DRAWERS;
             button.title = button.disabled
@@ -756,6 +748,29 @@ function setupCanvasSizes() {
     remoteParticipants.forEach((tile) => resizeRemoteCanvas(tile));
 }
 
+// ============================================================
+// VIDEO CONTAINER RESIZE OBSERVER
+// Keeps landmarkCanvas / airCanvas backing size in sync with the
+// video container whenever the participant grid reflows (join,
+// leave, sidebar open, window resize, device rotation, ...).
+// ============================================================
+
+let videoContainerResizeObserver = null;
+
+function observeVideoContainerSize() {
+    if (typeof ResizeObserver === "undefined") return;
+    if (videoContainerResizeObserver) return;
+
+    const container = video?.parentElement;
+    if (!container) return;
+
+    videoContainerResizeObserver = new ResizeObserver(() => {
+        setupCanvasSizes();
+    });
+
+    videoContainerResizeObserver.observe(container);
+}
+
 function resizeRemoteCanvas(tile) {
     if (!tile?.canvas || !tile.container) return;
 
@@ -880,9 +895,6 @@ function createRemoteTile(participant) {
     remoteVid.style.width = "100%";
     remoteVid.style.height = "100%";
     remoteVid.style.objectFit = "cover";
-    // FIX 1: remote video must show the SAME orientation as the
-    // speaker's own selfie preview → mirror it, exactly like the
-    // local preview.
     remoteVid.style.transform = "scaleX(-1)";
     remoteVid.style.display = "block";
     remoteVid.style.visibility = "visible";
@@ -896,9 +908,6 @@ function createRemoteTile(participant) {
     canvas.style.height = "100%";
     canvas.style.pointerEvents = "none";
     canvas.style.zIndex = "5";
-    // The drawing canvas stays UNMIRRORED — the draw-sync pipeline
-    // already sends 1-x, so strokes remain aligned with the (now
-    // mirrored) remote video.
     canvas.style.transform = "none";
 
     const audio = document.createElement("audio");
@@ -929,6 +938,13 @@ function createRemoteTile(participant) {
     });
 
     requestAnimationFrame(() => resizeRemoteCanvas(tile));
+
+    // Keep this remote tile's drawing canvas aligned whenever the
+    // grid reflows (participant joins/leaves, window resize, ...).
+    if (typeof ResizeObserver !== "undefined") {
+        const ro = new ResizeObserver(() => resizeRemoteCanvas(tile));
+        ro.observe(container);
+    }
 
     updateParticipantCount();
 
@@ -989,8 +1005,6 @@ function attachRemoteVideo(participant, track) {
     try {
         track.attach(tile.video);
 
-        // FIX 1: keep remote video mirrored so it matches the
-        // speaker's own selfie preview.
         tile.video.style.transform = "scaleX(-1)";
         tile.video.style.display = "block";
         tile.video.style.visibility = "visible";
@@ -1975,7 +1989,6 @@ function handleWebSocketMessage(data) {
         }
 
         case "drawing_permission_denied": {
-            // No request UI exists anymore; just log.
             console.log(
                 "🚫 Drawing permission unavailable:",
                 data.message || ""
@@ -2056,12 +2069,6 @@ function handleWebSocketMessage(data) {
             break;
         }
 
-        // ------------------------------------------------------------
-        // FIX 3: revoke_drawing handler.
-        // This is the counterpart of grant_drawing. Previously this
-        // case did not exist at all, so "Remove Drawing" silently
-        // did nothing on the target participant.
-        // ------------------------------------------------------------
         case "revoke_drawing": {
             const id =
                 data.target_livekit_identity
@@ -2775,6 +2782,7 @@ function initializeApplication() {
     initializeMeetingPanels();
     updateLocalUI();
     setupCanvasSizes();
+    observeVideoContainerSize();          // ← ADDED: keeps canvas in sync with grid reflow
     hideLegacyRemoteCard();
     updateParticipantCount();
     updateCanvasAvailability();
