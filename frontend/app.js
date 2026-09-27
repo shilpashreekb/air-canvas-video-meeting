@@ -39,17 +39,18 @@ const joinMeetingButton = document.getElementById("joinMeetingButton");
 const meetingIdDisplay = document.getElementById("meetingIdDisplay");
 const meetingIdLarge = document.getElementById("meetingIdLarge");
 const copyMeetingId = document.getElementById("copyMeetingId");
-// connectionStatus element was removed from the visible header.
-const connectionStatus = document.getElementById("connectionStatus");
+const connectionStatus = document.getElementById("connectionStatus"); // null-safe
 const localParticipantLabel = document.getElementById("localParticipantLabel");
+// Legacy placeholder elements (removed from HTML) — null-safe lookups.
 const remoteParticipantLabel = document.getElementById("remoteParticipantLabel");
 const waitingParticipant = document.getElementById("waitingParticipant");
-const video = document.getElementById("video");
 const remoteVideo = document.getElementById("remoteVideo");
 const remoteCanvas = document.getElementById("remoteCanvas");
 const remoteAudio = document.getElementById("remoteAudio");
+const video = document.getElementById("video");
 const airCanvas = document.getElementById("airCanvas");
 const landmarkCanvas = document.getElementById("landmarkCanvas");
+const cameraOffOverlay = document.getElementById("cameraOffOverlay");
 const gestureDisplay = document.getElementById("gesture");
 const confidenceDisplay = document.getElementById("confidence");
 const startCameraBtn = document.getElementById("startCamera");
@@ -438,6 +439,24 @@ function showMeeting() {
 
 
 // ============================================================
+// CAMERA-OFF OVERLAY (LOCAL)
+// ============================================================
+
+function setLocalCameraOffUI(off) {
+    const localCard = participantsGrid
+        ? participantsGrid.querySelector('.participant-card[data-identity="local"]')
+        : null;
+
+    if (localCard) {
+        localCard.classList.toggle("camera-off", Boolean(off));
+    }
+    if (cameraOffOverlay) {
+        cameraOffOverlay.classList.toggle("hidden", !off);
+    }
+}
+
+
+// ============================================================
 // PAGINATION (max 4 desktop / 2 mobile; 3-in-strip when pinned)
 // ============================================================
 
@@ -480,36 +499,28 @@ function applyPagination() {
         );
 
         if (!pinnedCard) {
-            // Pinned card gone: fall back to normal layout
             pinnedIdentity = null;
             participantsGrid.classList.remove("has-pinned");
             return applyPagination();
         }
 
-        // Pinned card is never hidden by pagination.
         pinnedCard.classList.remove("page-hidden");
         pinnedCard.classList.remove("grid-span-2");
         allCards.forEach((c) => c.classList.remove("grid-span-2"));
 
         if (isMobileView()) {
-            // Mobile pinned: only the pinned card is fully visible;
-            // the local card (if not the pinned one) becomes a
-            // floating self-view thumbnail via CSS.
             allCards.forEach((c) => {
                 if (c === pinnedCard) {
                     c.classList.remove("page-hidden");
                 } else if (c.dataset.identity === "local") {
-                    c.classList.remove("page-hidden"); // shown as thumb
+                    c.classList.remove("page-hidden");
                 } else {
                     c.classList.add("page-hidden");
                 }
             });
-            // No pagination while pinned on mobile.
             const bar = document.getElementById("paginationBar");
             if (bar) bar.classList.add("hidden");
         } else {
-            // Desktop pinned: paginate the NON-pinned cards in the strip,
-            // 3 per page (one page = 1 pinned + 3 strip = 4 visible).
             const others = allCards.filter((c) => c !== pinnedCard);
             const perPage = 3;
             const totalPages = Math.max(1, Math.ceil(others.length / perPage));
@@ -555,7 +566,7 @@ function applyPagination() {
 
     allCards.forEach((c) => c.classList.remove("grid-span-2"));
 
-    // Desktop 3-tile case: last visible card spans full width on the bottom row.
+    // Desktop 3-tile case: last visible card spans full width.
     const isDesktop = window.innerWidth > 640;
     if (isDesktop && visibleCount === 3) {
         const visible = allCards.slice(start, end);
@@ -578,7 +589,7 @@ function goToPage(page) {
 
     let perPage;
     if (pinnedIdentity) {
-        perPage = 3; // desktop pinned strip size
+        perPage = 3;
     } else {
         perPage = getPerPage();
     }
@@ -842,9 +853,15 @@ function ensureFeatureStyles() {
             color: var(--accent) !important;
         }
 
+        /* ==========================================
+           Pin / Fit / Restore controls — anchored to
+           the BOTTOM-RIGHT of each video tile.
+           ========================================== */
         .participant-card .card-controls {
             position: absolute;
-            top: 8px;
+            /* MOVED: from top → bottom */
+            top: auto;
+            bottom: 8px;
             right: 8px;
             display: flex;
             gap: 5px;
@@ -887,6 +904,7 @@ function ensureFeatureStyles() {
             pointer-events: auto !important;
         }
 
+        /* Native fullscreen card — card controls stay bottom-anchored. */
         .participant-card:fullscreen,
         .participant-card:-webkit-full-screen {
             width: 100vw;
@@ -921,7 +939,8 @@ function ensureFeatureStyles() {
         }
         .participant-card:fullscreen .card-controls,
         .participant-card:-webkit-full-screen .card-controls {
-            top: 20px;
+            top: auto;
+            bottom: 20px;
             right: 20px;
         }
     `;
@@ -1307,6 +1326,7 @@ function updateRequestDrawUI() {
     if (!fab) return;
     const canDraw = isMeetingCreator || canvasEnabled;
     const icon = fab.querySelector(".draw-fab-icon");
+    const text = fab.querySelector(".draw-fab-text");
 
     fab.classList.remove("fab-canvas", "fab-request", "fab-pending");
 
@@ -1315,16 +1335,19 @@ function updateRequestDrawUI() {
         fab.title = "Air Canvas";
         fab.setAttribute("aria-label", "Open Air Canvas drawing tools");
         if (icon) icon.textContent = "🎨";
+        if (text) text.textContent = "Air Canvas";
     } else if (drawingPermissionRequested) {
         fab.classList.add("fab-pending");
         fab.title = "Waiting for host approval";
         fab.setAttribute("aria-label", "Waiting for host approval");
         if (icon) icon.textContent = "⏳";
+        if (text) text.textContent = "Waiting for approval";
     } else {
         fab.classList.add("fab-request");
-        fab.title = "Request drawing permission";
-        fab.setAttribute("aria-label", "Request to draw");
+        fab.title = "Ask permission to draw";
+        fab.setAttribute("aria-label", "Ask permission to draw");
         if (icon) icon.textContent = "✋";
+        if (text) text.textContent = "Ask permission to draw";
     }
 }
 
@@ -1614,7 +1637,6 @@ function applyPinState() {
     if (!participantsGrid) return;
     const cards = participantsGrid.querySelectorAll(".participant-card");
 
-    // Reset pin chrome on all cards
     cards.forEach((card) => {
         card.classList.remove("pinned-card");
         const pinBtn = card.querySelector(".pin-btn");
@@ -1730,8 +1752,10 @@ function handleFullscreenChange() {
 function setupLocalCardControls() {
     if (!participantsGrid) return;
     const localCard = participantsGrid
-        .querySelector(".participant-card .video-container")
-        ?.closest(".participant-card");
+        .querySelector('.participant-card[data-identity="local"]') ||
+        participantsGrid
+            .querySelector(".participant-card .video-container")
+            ?.closest(".participant-card");
     if (!localCard) return;
     if (!localCard.dataset.identity) {
         localCard.dataset.identity = "local";
@@ -2082,7 +2106,7 @@ function getVideoCoverTransform() {
     const vh = video.videoHeight;
     if (!cw || !ch || !vw || !vh) return null;
 
-    // Matches the CSS object-fit: contain applied to the video element.
+    // Matches CSS object-fit: contain on the video element.
     const scale = Math.min(cw / vw, ch / vh);
     const dispW = vw * scale;
     const dispH = vh * scale;
@@ -2130,10 +2154,12 @@ function clearLocalCanvas() {
 }
 
 // ============================================================
-// REMOTE PARTICIPANT TILES (UNCHANGED)
+// REMOTE PARTICIPANT TILES (UNCHANGED core, added camera-off state)
 // ============================================================
 
 function hideLegacyRemoteCard() {
+    // The legacy placeholder card has been removed from HTML.
+    // Kept as a no-op for safety.
     const card = remoteVideo?.closest(".participant-card");
     if (card) card.style.display = "none";
     if (remoteAudio) remoteAudio.style.display = "none";
@@ -2169,10 +2195,12 @@ function createRemoteTile(participant) {
     const container = document.createElement("div");
     container.className = "remote-video-container";
 
-    const waiting = document.createElement("div");
-    waiting.className = "waiting-participant";
-    waiting.innerHTML =
-        '<div class="participant-avatar">👤</div><span>Waiting for camera...</span>';
+    // Camera-off state placeholder (no more "waiting for participant" text).
+    const cameraOff = document.createElement("div");
+    cameraOff.className = "camera-off-overlay";
+    cameraOff.innerHTML =
+        '<div class="camera-off-avatar">👤</div>' +
+        '<span class="camera-off-text">Camera off</span>';
 
     const remoteVid = document.createElement("video");
     remoteVid.autoplay = true;
@@ -2208,7 +2236,7 @@ function createRemoteTile(participant) {
     const audio = document.createElement("audio");
     audio.autoplay = true;
 
-    container.append(waiting, remoteVid, screenVid, canvas, audio);
+    container.append(remoteVid, screenVid, canvas, cameraOff, audio);
     card.append(label, container);
     participantsGrid.appendChild(card);
 
@@ -2218,7 +2246,7 @@ function createRemoteTile(participant) {
         card,
         label,
         container,
-        waiting,
+        cameraOff,
         video: remoteVid,
         screenVideo: screenVid,
         screenTrack: null,
@@ -2228,6 +2256,10 @@ function createRemoteTile(participant) {
     };
 
     remoteParticipants.set(identity, tile);
+
+    // Card starts in camera-off state until a video track arrives.
+    card.classList.add("camera-off");
+
     addCardControls(card, identity);
 
     requestAnimationFrame(() => {
@@ -2296,8 +2328,18 @@ function attachRemoteVideo(participant, track) {
         tile.video.style.opacity = "1";
         tile.video.style.transform = "scaleX(-1)";
         tile.canvas.style.transform = "none";
-        tile.waiting.style.display = "none";
         tile.video.play().catch(() => {});
+
+        // Reflect mute state if the track is already muted.
+        const isMutedTrack = (typeof track.isMuted === "boolean")
+            ? track.isMuted : false;
+        tile.card.classList.toggle("camera-off", isMutedTrack);
+
+        // Also react to LiveKit mute/unmute events on this track.
+        try {
+            track.on?.("muted", () => tile.card.classList.add("camera-off"));
+            track.on?.("unmuted", () => tile.card.classList.remove("camera-off"));
+        } catch (_) {}
     } catch (error) {
         console.error("❌ Remote video attach failed:", error);
     }
@@ -2323,9 +2365,10 @@ function attachRemoteScreenShare(participant, track) {
         tile.screenVideo.style.display = "block";
         tile.screenVideo.style.transform = "none";
         tile.screenTrack = track;
-        tile.waiting.style.display = "none";
         tile.canvas.style.opacity = "0";
         tile.screenVideo.play().catch(() => {});
+        // Screenshare visible: hide the camera-off overlay.
+        tile.card.classList.remove("camera-off");
     } catch (error) {
         console.error("❌ Remote screen share attach failed:", error);
     }
@@ -2355,7 +2398,7 @@ function detachParticipantTrack(participant, track) {
     try {
         if (track.kind === window.LivekitClient.Track.Kind.Video) {
             tile.video.style.display = "none";
-            tile.waiting.style.display = "block";
+            tile.card.classList.add("camera-off");
         }
     } catch (_) {}
 }
@@ -2365,7 +2408,7 @@ function detachRemoteTrack(participant, track) {
 }
 
 // ============================================================
-// CAMERA (UNCHANGED)
+// CAMERA (UNCHANGED core; camera-off UI now reflected locally)
 // ============================================================
 
 async function startLocalMedia() {
@@ -2390,6 +2433,8 @@ async function startLocalMedia() {
     await video.play();
 
     isCameraStarted = true;
+    isCameraOff = false;
+    setLocalCameraOffUI(false);
 
     if (cameraStatus) {
         cameraStatus.textContent = "✅ Camera & Mic On";
@@ -3529,7 +3574,7 @@ function loadLiveKitSDK() {
 }
 
 // ============================================================
-// LIVEKIT (UNCHANGED)
+// LIVEKIT (UNCHANGED core + added TrackMuted/Unmuted listeners)
 // ============================================================
 
 async function connectLiveKit() {
@@ -3588,6 +3633,26 @@ async function connectLiveKit() {
             }
         }
     );
+
+    // Reflect remote camera mute/unmute on their tiles.
+    try {
+        liveKitRoom.on(LK.RoomEvent.TrackMuted, (publication, participant) => {
+            const identity = String(participant?.identity || "");
+            if (!identity || identity === liveKitIdentity) return;
+            if (publication?.kind !== LK.Track.Kind.Video) return;
+            if (isScreenShareTrack(publication?.track, publication)) return;
+            const tile = remoteParticipants.get(identity);
+            if (tile) tile.card.classList.add("camera-off");
+        });
+        liveKitRoom.on(LK.RoomEvent.TrackUnmuted, (publication, participant) => {
+            const identity = String(participant?.identity || "");
+            if (!identity || identity === liveKitIdentity) return;
+            if (publication?.kind !== LK.Track.Kind.Video) return;
+            if (isScreenShareTrack(publication?.track, publication)) return;
+            const tile = remoteParticipants.get(identity);
+            if (tile) tile.card.classList.remove("camera-off");
+        });
+    } catch (_) {}
 
     liveKitRoom.on(LK.RoomEvent.ParticipantConnected, (participant) => {
         const identity = String(participant.identity);
@@ -3731,12 +3796,10 @@ function setupMeetingUI() {
 
     updateLocalUI();
 
-    if (remoteParticipantLabel) remoteParticipantLabel.textContent = "Participant";
-    if (waitingParticipant) waitingParticipant.style.display = "block";
-
     hideLegacyRemoteCard();
     clearRemoteTiles();
     clearLocalCanvas();
+    setLocalCameraOffUI(isCameraOff);
 
     updateParticipantCount();
     updateCanvasAvailability();
@@ -3848,6 +3911,10 @@ async function toggleCamera() {
         try { await liveKitRoom.localParticipant.setCameraEnabled(!isCameraOff); }
         catch (error) { console.warn("⚠️ LiveKit camera toggle:", error); }
     }
+
+    // Reflect the camera-off state on the local user's own video tile.
+    setLocalCameraOffUI(isCameraOff);
+
     if (cameraButton) {
         cameraButton.classList.toggle("camera-off", isCameraOff);
         const label = cameraButton.querySelector(".toolbar-label");
@@ -3905,6 +3972,7 @@ async function cleanupMeeting(stopCameraToo = true) {
     clearCanvasElement(landmarkCanvas);
 
     if (stopCameraToo) stopLocalMedia();
+    setLocalCameraOffUI(false);
 
     meetingId = null;
     isMeetingCreator = false;
@@ -4043,7 +4111,7 @@ meetingIdInput?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") joinMeeting();
 });
 
-// Re-apply pagination on resize (debounced) & recompute canvas sizes.
+// Re-apply pagination on resize (debounced).
 let __resizeTimer = null;
 window.addEventListener("resize", () => {
     setupCanvasSizes();
@@ -4102,6 +4170,7 @@ function initializeApplication() {
     updateScreenShareUI();
     updateHostOnlyControls();
     setConnectionStatus("Disconnected");
+    setLocalCameraOffUI(false);
 
     setupLocalCardControls();
     applyPagination();
