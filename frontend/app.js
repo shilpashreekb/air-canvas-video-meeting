@@ -30,6 +30,9 @@ const DRAW_SEND_INTERVAL_MS = 30;
 const CLEAR_COOLDOWN_MS = 700;
 const DRAWING_HISTORY_CHUNK_SIZE = 30;
 
+const REACTION_OPTIONS = ["👍", "👏", "❤️", "😂", "😮", "🎉"];
+const NOTIFICATION_LIFETIME_MS = 3500;
+
 // ============================================================
 // DOM
 // ============================================================
@@ -113,6 +116,16 @@ let isCameraOff = false;
 
 let liveKitIdentity =
     "aircanvas-" + Math.random().toString(36).substring(2, 10);
+
+// ----- New feature state -------------------------------------
+
+// Identities (LiveKit) whose hands are currently raised.
+const raisedHands = new Set();
+
+// Screen sharing state.
+let isScreenSharing = false;
+let screenShareStream = null;
+let screenShareTrack = null;
 
 // ============================================================
 // MEDIAPIPE STATE
@@ -418,11 +431,30 @@ function renderParticipantsList() {
         const infoBox = document.createElement("div");
         infoBox.className = "participant-list-info";
 
+        // Determine raised-hand state for this entry
+        let isHandRaised;
+        if (info.isLocal) {
+            isHandRaised = raisedHands.has(String(liveKitIdentity));
+        } else {
+            isHandRaised = raisedHands.has(
+                String(info.livekitIdentity || id)
+            );
+        }
+
         const name = document.createElement("div");
         name.className = "participant-list-name";
-        name.textContent = info.isLocal
-            ? `${info.name || "You"} (You)`
-            : info.name || "Participant";
+        const nameText = document.createTextNode(
+            info.isLocal
+                ? `${info.name || "You"} (You)`
+                : info.name || "Participant"
+        );
+        name.appendChild(nameText);
+        if (isHandRaised) {
+            const hand = document.createElement("span");
+            hand.className = "participant-list-hand";
+            hand.textContent = "✋";
+            name.appendChild(hand);
+        }
 
         const role = document.createElement("div");
         role.className = "participant-list-role";
@@ -482,11 +514,528 @@ function initializeMeetingPanels() {
     updateParticipantCount();
 }
 
-// ------------------------------------------------------------
-// BUG 2 FIX: Clear stays available even when the participant
-// no longer has drawing permission, as long as they still have
-// strokes on their own canvas (localDrawingHistory is non-empty).
-// ------------------------------------------------------------
+// ============================================================
+// FEATURE ADDITIONS: UI HELPERS (notifications, reactions, extra
+// controls). These inject themselves at runtime so no HTML/CSS
+// changes are needed.
+// ============================================================
+
+function ensureFeatureStyles() {
+    if (document.getElementById("airCanvasFeatureStyles")) return;
+
+    const style = document.createElement("style");
+    style.id = "airCanvasFeatureStyles";
+    style.textContent = `
+        .meeting-notifications {
+            position: fixed;
+            top: 70px;
+            right: 16px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: none;
+            max-width: 320px;
+        }
+        .meeting-notification {
+            background: rgba(28, 30, 34, 0.94);
+            color: #f5f5f5;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 13px;
+            line-height: 1.35;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+            opacity: 0;
+            transform: translateX(12px);
+            transition: opacity 0.25s ease, transform 0.25s ease;
+            pointer-events: auto;
+            max-width: 320px;
+            word-break: break-word;
+        }
+        .meeting-notification.visible {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        .meeting-notification.leaving {
+            opacity: 0;
+            transform: translateX(12px);
+        }
+        .reactions-menu {
+            position: fixed;
+            z-index: 9998;
+            background: #1b1d20;
+            border: 1px solid #34383e;
+            border-radius: 10px;
+            padding: 6px;
+            display: flex;
+            gap: 4px;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+        }
+        .reactions-menu.hidden {
+            display: none !important;
+        }
+        .reaction-option {
+            width: 40px;
+            height: 40px;
+            border: 0;
+            border-radius: 8px;
+            background: transparent;
+            font-size: 22px;
+            cursor: pointer;
+            transition: background 0.15s ease, transform 0.15s ease;
+        }
+        .reaction-option:hover {
+            background: #2c3035;
+            transform: scale(1.08);
+        }
+        .reaction-bubble {
+            position: absolute;
+            bottom: 12px;
+            right: 12px;
+            font-size: 40px;
+            z-index: 30;
+            pointer-events: none;
+            opacity: 0;
+            transform: translateY(10px) scale(0.9);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.4));
+        }
+        .reaction-bubble.visible {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+        .reaction-bubble.leaving {
+            opacity: 0;
+            transform: translateY(-20px) scale(1.15);
+        }
+        .remote-screenshare-video {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #000;
+            z-index: 3;
+            display: none;
+        }
+        .participant-list-hand {
+            margin-left: 6px;
+            font-size: 0.85rem;
+            display: inline-block;
+        }
+        .control-button.hand-raised,
+        .control-button.sharing {
+            background: #315fba !important;
+            border-color: #4f8cff !important;
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+function ensureNotificationsContainer() {
+    let container = document.getElementById("meetingNotifications");
+    if (!container) {
+        container = document.createElement("div");
+        container.id = "meetingNotifications";
+        container.className = "meeting-notifications";
+        document.body.appendChild(container);
+    }
+    return container;
+}
+
+function showMeetingNotification(text, opts = {}) {
+    if (!text) return;
+    const container = ensureNotificationsContainer();
+    const toast = document.createElement("div");
+    toast.className = "meeting-notification";
+    toast.textContent = String(text);
+
+    if (opts.tone === "warning") {
+        toast.style.borderColor = "rgba(240, 180, 90, 0.5)";
+    }
+
+    container.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add("visible"));
+
+    const lifetime =
+        typeof opts.duration === "number"
+            ? opts.duration
+            : NOTIFICATION_LIFETIME_MS;
+
+    setTimeout(() => {
+        toast.classList.remove("visible");
+        toast.classList.add("leaving");
+        setTimeout(() => {
+            try {
+                toast.remove();
+            } catch (_) {}
+        }, 320);
+    }, lifetime);
+}
+
+function ensureReactionsMenu() {
+    let menu = document.getElementById("reactionsMenu");
+    if (menu) return menu;
+
+    menu = document.createElement("div");
+    menu.id = "reactionsMenu";
+    menu.className = "reactions-menu hidden";
+
+    REACTION_OPTIONS.forEach((emoji) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "reaction-option";
+        btn.textContent = emoji;
+        btn.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            sendReaction(emoji);
+            toggleReactionsMenu(false);
+        });
+        menu.appendChild(btn);
+    });
+
+    document.body.appendChild(menu);
+    return menu;
+}
+
+function positionReactionsMenu(menu) {
+    const btn = document.getElementById("reactionsButton");
+    if (!btn || !menu) return;
+    const rect = btn.getBoundingClientRect();
+    const menuWidth = 6 * 44 + 12; // approx; keeps left edge reasonable
+    const left = Math.min(
+        Math.max(8, rect.left + rect.width / 2 - menuWidth / 2),
+        window.innerWidth - menuWidth - 8
+    );
+    menu.style.left = `${left}px`;
+    menu.style.bottom = `${window.innerHeight - rect.top + 8}px`;
+    menu.style.top = "";
+}
+
+function toggleReactionsMenu(force) {
+    const menu = ensureReactionsMenu();
+    const shouldShow =
+        typeof force === "boolean"
+            ? force
+            : menu.classList.contains("hidden");
+
+    menu.classList.toggle("hidden", !shouldShow);
+    if (shouldShow) positionReactionsMenu(menu);
+}
+
+function ensureExtraControls() {
+    const group = document.querySelector(
+        ".meeting-controls .control-group"
+    );
+    if (!group) return;
+
+    // --- Hand raise ------------------------------------------
+    if (!document.getElementById("handRaiseButton")) {
+        const handBtn = document.createElement("button");
+        handBtn.id = "handRaiseButton";
+        handBtn.type = "button";
+        handBtn.className = "control-button meeting-action";
+        handBtn.title = "Raise or lower your hand";
+        handBtn.innerHTML =
+            '<span class="control-icon">✋</span><span class="control-text">Raise Hand</span>';
+        handBtn.addEventListener("click", toggleRaiseHand);
+        group.appendChild(handBtn);
+    }
+
+    // --- Reactions -------------------------------------------
+    if (!document.getElementById("reactionsButton")) {
+        const reactBtn = document.createElement("button");
+        reactBtn.id = "reactionsButton";
+        reactBtn.type = "button";
+        reactBtn.className = "control-button meeting-action";
+        reactBtn.title = "Send a reaction";
+        reactBtn.innerHTML =
+            '<span class="control-icon">😊</span><span class="control-text">Reactions</span>';
+        reactBtn.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            toggleReactionsMenu();
+        });
+        group.appendChild(reactBtn);
+    }
+
+    // --- Screen share ----------------------------------------
+    if (!document.getElementById("screenShareButton")) {
+        const shareBtn = document.createElement("button");
+        shareBtn.id = "screenShareButton";
+        shareBtn.type = "button";
+        shareBtn.className = "control-button meeting-action";
+        shareBtn.title = "Share your screen";
+        shareBtn.innerHTML =
+            '<span class="control-icon">🖥️</span><span class="control-text">Share</span>';
+        shareBtn.addEventListener("click", toggleScreenShare);
+        group.appendChild(shareBtn);
+    }
+
+    // Close reactions menu on outside click
+    if (!window.__airCanvasOutsideClickBound) {
+        window.__airCanvasOutsideClickBound = true;
+        document.addEventListener("click", (ev) => {
+            const menu = document.getElementById("reactionsMenu");
+            if (!menu || menu.classList.contains("hidden")) return;
+            if (menu.contains(ev.target)) return;
+            if (ev.target.closest && ev.target.closest("#reactionsButton")) {
+                return;
+            }
+            toggleReactionsMenu(false);
+        });
+    }
+}
+
+// ============================================================
+// FEATURE: HAND RAISE
+// ============================================================
+
+function toggleRaiseHand() {
+    const currentlyRaised = raisedHands.has(liveKitIdentity);
+    const nextRaised = !currentlyRaised;
+
+    if (nextRaised) {
+        raisedHands.add(liveKitIdentity);
+    } else {
+        raisedHands.delete(liveKitIdentity);
+    }
+
+    updateHandRaiseButton();
+    updateLocalUI();
+    renderParticipantsList();
+
+    broadcastRaiseHand(nextRaised);
+
+    showMeetingNotification(
+        nextRaised ? "✋ You raised your hand" : "You lowered your hand"
+    );
+}
+
+function updateHandRaiseButton() {
+    const btn = document.getElementById("handRaiseButton");
+    if (!btn) return;
+    const raised = raisedHands.has(liveKitIdentity);
+    btn.classList.toggle("hand-raised", raised);
+    const textEl = btn.querySelector(".control-text");
+    if (textEl) textEl.textContent = raised ? "Lower Hand" : "Raise Hand";
+    const iconEl = btn.querySelector(".control-icon");
+    if (iconEl) iconEl.textContent = raised ? "🖐️" : "✋";
+}
+
+function broadcastRaiseHand(raised) {
+    sendWS({
+        type: "raise_hand",
+        raised: Boolean(raised),
+        user_name: userName,
+        livekit_identity: liveKitIdentity
+    });
+}
+
+// ============================================================
+// FEATURE: REACTIONS
+// ============================================================
+
+function findTileContainer(identity) {
+    const key = String(identity || "");
+    if (!key) return null;
+    if (key === String(liveKitIdentity)) {
+        return video?.parentElement || null;
+    }
+    const tile = remoteParticipants.get(key);
+    return tile?.container || null;
+}
+
+function showReactionBubble(identity, emoji) {
+    const container = findTileContainer(identity);
+    if (!container || !emoji) return;
+
+    const bubble = document.createElement("div");
+    bubble.className = "reaction-bubble";
+    bubble.textContent = emoji;
+    container.appendChild(bubble);
+
+    requestAnimationFrame(() => bubble.classList.add("visible"));
+
+    setTimeout(() => {
+        bubble.classList.remove("visible");
+        bubble.classList.add("leaving");
+        setTimeout(() => {
+            try {
+                bubble.remove();
+            } catch (_) {}
+        }, 400);
+    }, 2200);
+}
+
+function sendReaction(emoji) {
+    if (!emoji) return;
+    if (!liveKitConnected) return;
+
+    // Local echo: show our own reaction in our own tile and a toast.
+    showReactionBubble(liveKitIdentity, emoji);
+    showMeetingNotification(`${emoji} You reacted`);
+
+    sendWS({
+        type: "reaction",
+        emoji: String(emoji),
+        user_name: userName,
+        livekit_identity: liveKitIdentity
+    });
+}
+
+// ============================================================
+// FEATURE: SCREEN SHARING
+// ============================================================
+
+function isScreenShareTrack(track) {
+    if (!track) return false;
+    try {
+        const LK = window.LivekitClient;
+        if (
+            LK?.Track?.Source?.ScreenShare &&
+            track.source === LK.Track.Source.ScreenShare
+        ) {
+            return true;
+        }
+    } catch (_) {}
+    const s = String(track.source || "").toLowerCase();
+    return s === "screen_share" || s === "screenshare";
+}
+
+function updateScreenShareUI() {
+    const btn = document.getElementById("screenShareButton");
+    if (!btn) return;
+    btn.classList.toggle("sharing", isScreenSharing);
+    const textEl = btn.querySelector(".control-text");
+    if (textEl) textEl.textContent = isScreenSharing ? "Stop" : "Share";
+}
+
+function cleanupScreenShareLocal() {
+    isScreenSharing = false;
+    screenShareStream = null;
+    screenShareTrack = null;
+}
+
+async function startScreenShare() {
+    if (isScreenSharing) return;
+
+    if (!liveKitConnected || !liveKitRoom?.localParticipant) {
+        alert("Not connected to the meeting yet.");
+        return;
+    }
+
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+        alert("Screen sharing is not supported in this browser.");
+        return;
+    }
+
+    try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+            video: { frameRate: { ideal: 15, max: 30 } },
+            audio: false
+        });
+
+        const track = stream.getVideoTracks()[0];
+        if (!track) {
+            try {
+                stream.getTracks().forEach((t) => t.stop());
+            } catch (_) {}
+            return;
+        }
+
+        screenShareStream = stream;
+        screenShareTrack = track;
+
+        const LK = window.LivekitClient;
+        const sourceValue =
+            (LK?.Track?.Source?.ScreenShare) || "screen_share";
+
+        await liveKitRoom.localParticipant.publishTrack(track, {
+            name: "air-canvas-screen-share",
+            source: sourceValue
+        });
+
+        isScreenSharing = true;
+        updateScreenShareUI();
+
+        showMeetingNotification("🖥️ You started screen sharing");
+
+        broadcastScreenShare(true);
+
+        // When the user stops sharing from the browser's own UI:
+        track.addEventListener("ended", () => {
+            stopScreenShare();
+        });
+    } catch (error) {
+        console.warn("Screen share cancelled or failed:", error);
+        cleanupScreenShareLocal();
+        updateScreenShareUI();
+    }
+}
+
+async function stopScreenShare() {
+    const wasSharing = isScreenSharing;
+
+    try {
+        if (screenShareTrack && liveKitRoom?.localParticipant) {
+            try {
+                await liveKitRoom.localParticipant.unpublishTrack(
+                    screenShareTrack,
+                    true
+                );
+            } catch (error) {
+                console.warn("unpublishTrack error:", error);
+            }
+        }
+    } catch (_) {}
+
+    try {
+        if (screenShareTrack) screenShareTrack.stop();
+    } catch (_) {}
+    try {
+        if (screenShareStream) {
+            screenShareStream
+                .getTracks()
+                .forEach((t) => {
+                    try {
+                        t.stop();
+                    } catch (_) {}
+                });
+        }
+    } catch (_) {}
+
+    cleanupScreenShareLocal();
+    updateScreenShareUI();
+
+    if (wasSharing) {
+        showMeetingNotification("🖥️ You stopped screen sharing");
+        broadcastScreenShare(false);
+    }
+}
+
+async function toggleScreenShare() {
+    if (isScreenSharing) {
+        await stopScreenShare();
+    } else {
+        await startScreenShare();
+    }
+}
+
+function broadcastScreenShare(active) {
+    sendWS({
+        type: "screen_share",
+        active: Boolean(active),
+        user_name: userName,
+        livekit_identity: liveKitIdentity
+    });
+}
+
+// ============================================================
+// CANVAS AVAILABILITY (unchanged logic, still supports clear
+// even after drawing permission is revoked)
+// ============================================================
+
 function updateCanvasAvailability() {
     const canDraw = isMeetingCreator || canvasEnabled;
     const canClear = canDraw || localDrawingHistory.length > 0;
@@ -518,7 +1067,6 @@ function updateCanvasAvailability() {
 function renderDrawingPermissionRequest() {
     if (!meetingMain) return;
 
-    // Remove any leftover request panel from previous versions.
     const panel = document.getElementById("drawingPermissionRequestPanel");
     if (panel) panel.remove();
 }
@@ -541,7 +1089,8 @@ function renderDrawingPermissions() {
         drawingPermissionsPanel.style.padding = "16px";
         drawingPermissionsPanel.style.borderRadius = "12px";
         drawingPermissionsPanel.style.background = "rgba(255,255,255,0.06)";
-        drawingPermissionsPanel.style.border = "1px solid rgba(255,255,255,0.12)";
+        drawingPermissionsPanel.style.border =
+            "1px solid rgba(255,255,255,0.12)";
         meetingMain.appendChild(drawingPermissionsPanel);
     }
 
@@ -612,7 +1161,6 @@ function renderDrawingPermissions() {
         );
 
         if (info.canvasEnabled) {
-            // Remove Drawing: send revoke + immediately update host UI.
             button.textContent = "Remove Drawing";
             button.onclick = () => {
                 sendWS({
@@ -677,7 +1225,9 @@ function renderDrawingPermissions() {
 
 function updateLocalUI() {
     if (localParticipantLabel) {
-        localParticipantLabel.textContent = userName || "You";
+        const raised = raisedHands.has(liveKitIdentity);
+        localParticipantLabel.textContent =
+            (userName || "You") + (raised ? " ✋" : "");
     }
 }
 
@@ -766,9 +1316,6 @@ function setupCanvasSizes() {
 
 // ============================================================
 // VIDEO CONTAINER RESIZE OBSERVER
-// Keeps landmarkCanvas / airCanvas backing size in sync with the
-// video container whenever the participant grid reflows (join,
-// leave, sidebar open, window resize, device rotation, ...).
 // ============================================================
 
 let videoContainerResizeObserver = null;
@@ -855,7 +1402,6 @@ function clearLocalCanvas() {
     lastDrawY = 0;
     lastSentDrawX = null;
     lastSentDrawY = null;
-    // Wipe the recorded history too — the canvas is empty.
     localDrawingHistory = [];
 }
 
@@ -880,8 +1426,10 @@ function createRemoteTile(participant) {
 
     if (remoteParticipants.has(identity)) {
         const existing = remoteParticipants.get(identity);
-        existing.label.textContent = participant.name || "Participant";
         existing.participant = participant;
+        const raised = raisedHands.has(identity);
+        existing.label.textContent =
+            (participant.name || "Participant") + (raised ? " ✋" : "");
         return existing;
     }
 
@@ -920,6 +1468,13 @@ function createRemoteTile(participant) {
     remoteVid.style.visibility = "visible";
     remoteVid.style.opacity = "1";
 
+    // New: screen-share video (hidden until a screen share track arrives).
+    const screenVid = document.createElement("video");
+    screenVid.autoplay = true;
+    screenVid.playsInline = true;
+    screenVid.setAttribute("playsinline", "");
+    screenVid.className = "remote-screenshare-video";
+
     const canvas = document.createElement("canvas");
     canvas.className = "remote-drawing-canvas";
     canvas.style.position = "absolute";
@@ -933,7 +1488,7 @@ function createRemoteTile(participant) {
     const audio = document.createElement("audio");
     audio.autoplay = true;
 
-    container.append(waiting, remoteVid, canvas, audio);
+    container.append(waiting, remoteVid, screenVid, canvas, audio);
     card.append(label, container);
     participantsGrid.appendChild(card);
 
@@ -945,6 +1500,8 @@ function createRemoteTile(participant) {
         container,
         waiting,
         video: remoteVid,
+        screenVideo: screenVid,
+        screenTrack: null,
         canvas,
         ctx: canvas.getContext("2d"),
         audio
@@ -959,8 +1516,6 @@ function createRemoteTile(participant) {
 
     requestAnimationFrame(() => resizeRemoteCanvas(tile));
 
-    // Keep this remote tile's drawing canvas aligned whenever the
-    // grid reflows (participant joins/leaves, window resize, ...).
     if (typeof ResizeObserver !== "undefined") {
         const ro = new ResizeObserver(() => resizeRemoteCanvas(tile));
         ro.observe(container);
@@ -1000,6 +1555,9 @@ function removeRemoteTile(identity) {
 
     try {
         tile.video.srcObject = null;
+    } catch (_) {}
+    try {
+        tile.screenVideo.srcObject = null;
     } catch (_) {}
     try {
         tile.audio.srcObject = null;
@@ -1049,6 +1607,44 @@ function attachRemoteAudio(participant, track) {
     } catch (error) {
         console.error("❌ Remote audio attach failed:", error);
     }
+}
+
+// New: screen share attach/detach
+function attachRemoteScreenShare(participant, track) {
+    const tile = createRemoteTile(participant);
+    if (!tile || !track) return;
+
+    try {
+        track.attach(tile.screenVideo);
+        tile.screenVideo.style.display = "block";
+        tile.screenTrack = track;
+        // Hide the camera video + drawing canvas overlay while sharing.
+        tile.video.style.display = "none";
+        tile.waiting.style.display = "none";
+        tile.canvas.style.opacity = "0";
+        tile.screenVideo.play().catch(() => {});
+    } catch (error) {
+        console.error("❌ Remote screen share attach failed:", error);
+    }
+}
+
+function detachRemoteScreenShare(participant, track) {
+    if (!participant) return;
+    const identity = String(participant.identity);
+    const tile = remoteParticipants.get(identity);
+    if (!tile) return;
+
+    try {
+        track.detach(tile.screenVideo);
+    } catch (_) {}
+
+    tile.screenVideo.style.display = "none";
+    tile.screenVideo.srcObject = null;
+    tile.screenTrack = null;
+
+    // Restore the camera view and drawing canvas.
+    tile.video.style.display = "block";
+    tile.canvas.style.opacity = "";
 }
 
 function detachParticipantTrack(participant, track) {
@@ -1243,13 +1839,6 @@ function initMediaPipe() {
     }
 }
 
-// ------------------------------------------------------------
-// BUG 1 FIX: MediaPipe's Camera.stop() can pause the <video>
-// element that holds our local stream. We stop MediaPipe as
-// before, then explicitly resume the local preview so the
-// participant's own tile never goes black just because drawing
-// permission was revoked.
-// ------------------------------------------------------------
 function stopMediaPipeOnly() {
     if (camera) {
         try {
@@ -1273,8 +1862,6 @@ function stopMediaPipeOnly() {
         }
     };
 
-    // Run immediately and once more after a tick, in case
-    // MediaPipe's stop() is async internally.
     restoreLocalPreview();
     setTimeout(restoreLocalPreview, 0);
     setTimeout(restoreLocalPreview, 120);
@@ -1448,7 +2035,6 @@ function resetDrawingState() {
     lastDrawY = 0;
     smoothDrawX = null;
     smoothDrawY = null;
-    // Start a fresh "last sent" anchor for the next stroke.
     lastSentDrawX = null;
     lastSentDrawY = null;
 }
@@ -1640,10 +2226,6 @@ function sendDrawData(x, y, prevX, prevY, action) {
     let prevLocalX = clamp(Number(prevX), 0, 1);
     let prevLocalY = Number(prevY);
 
-    // For "draw", always connect to the last position we ACTUALLY
-    // sent. If we used the caller's prevX (which advances every local
-    // frame even when this function early-returns), throttled frames
-    // would leave visible gaps on remote canvases.
     if (
         action !== "erase" &&
         lastSentDrawX !== null &&
@@ -1653,7 +2235,6 @@ function sendDrawData(x, y, prevX, prevY, action) {
         prevLocalY = lastSentDrawY;
     }
 
-    // Remember this position as the anchor for the next send.
     lastSentDrawX = localX;
     lastSentDrawY = localY;
 
@@ -1677,18 +2258,9 @@ function sendDrawData(x, y, prevX, prevY, action) {
 
     sendWS(message);
 
-    // Keep this event so late-joining participants can replay the
-    // same stroke.
     localDrawingHistory.push(message);
 }
 
-// ------------------------------------------------------------
-// BUG 2 FIX: allow clearing even when drawing permission has been
-// revoked, as long as the participant still has strokes on their
-// own canvas (localDrawingHistory non-empty). This does NOT grant
-// drawing permission — it only lets them clean up what they already
-// drew.
-// ------------------------------------------------------------
 function clearMyCanvasAndBroadcast() {
     const canClear =
         isMeetingCreator ||
@@ -1716,9 +2288,6 @@ function clearMyCanvasAndBroadcast() {
 
 // ============================================================
 // LATE-JOIN DRAWING SYNC
-// Sends this client's current drawing history to one specific
-// newly-joined participant so they see everything that was drawn
-// before they arrived.
 // ============================================================
 
 function sendDrawingHistoryTo(targetIdentity) {
@@ -1928,8 +2497,22 @@ function handleLiveKitData(payload, participant) {
             userIdToLiveKitIdentity.set(senderIdentity, senderIdentity);
             liveKitIdentityToUserId.set(senderIdentity, senderIdentity);
 
+            // New: adopt any pre-existing raised-hand state.
+            if (data.raised_hand) {
+                raisedHands.add(senderIdentity);
+                const tile = remoteParticipants.get(senderIdentity);
+                if (tile) {
+                    const base =
+                        tile.participant?.name ||
+                        info.name ||
+                        "Participant";
+                    tile.label.textContent = base + " ✋";
+                }
+            }
+
             updateParticipantCount();
             renderDrawingPermissions();
+            renderParticipantsList();
             return;
         }
 
@@ -2097,6 +2680,7 @@ function handleWebSocketMessage(data) {
                 userIdToLiveKitIdentity.delete(id);
                 participantInfo.delete(id);
                 drawingPermissionRequests.delete(id);
+                raisedHands.delete(id);
             }
 
             if (data.livekit_identity) {
@@ -2104,17 +2688,18 @@ function handleWebSocketMessage(data) {
                 removeRemoteTile(identity);
                 participantInfo.delete(identity);
                 drawingPermissionRequests.delete(identity);
+                raisedHands.delete(identity);
             }
 
             updateParticipantCount();
             renderDrawingPermissions();
+            renderParticipantsList();
             break;
         }
 
         case "request_drawing":
         case "drawing_permission_request": {
-            // Participants no longer request permission, but if an older
-            // client ever sends one, we safely ignore it.
+            // Participants no longer request permission.
             break;
         }
 
@@ -2181,9 +2766,6 @@ function handleWebSocketMessage(data) {
                         initMediaPipe();
                     }
                 } else {
-                    // Do NOT stop MediaPipe on revoke — the guard in
-                    // onResults already blocks drawing. Keeping the
-                    // pipeline alive avoids pausing the local <video>.
                     if (landmarkCanvas) {
                         clearCanvasElement(landmarkCanvas);
                     }
@@ -2248,11 +2830,6 @@ function handleWebSocketMessage(data) {
             ) {
                 canvasEnabled = false;
 
-                // BUG 1 FIX: do NOT stop MediaPipe here. Its Camera.stop()
-                // would pause the local <video> element and blacken the
-                // participant's own tile. The guard in onResults already
-                // prevents drawing when canvasEnabled is false, so we only
-                // clear the landmark overlay and reset stroke state.
                 if (landmarkCanvas) {
                     clearCanvasElement(landmarkCanvas);
                 }
@@ -2351,6 +2928,77 @@ function handleWebSocketMessage(data) {
         case "clear_canvas":
             handleRemoteClear(data);
             break;
+
+        // ----- New: reactions & hand raise --------------------
+
+        case "reaction": {
+            const emoji = String(data.emoji || "");
+            const senderId = String(data.livekit_identity || "");
+            if (!emoji) break;
+            if (!senderId || senderId === String(liveKitIdentity)) break;
+
+            const name =
+                data.user_name ||
+                participantInfo.get(senderId)?.name ||
+                remoteParticipants.get(senderId)?.participant?.name ||
+                "Someone";
+
+            showReactionBubble(senderId, emoji);
+            showMeetingNotification(`${emoji} ${name} reacted`);
+            break;
+        }
+
+        case "raise_hand": {
+            const senderId = String(data.livekit_identity || "");
+            if (!senderId || senderId === String(liveKitIdentity)) break;
+
+            const raised = Boolean(data.raised);
+            const name =
+                data.user_name ||
+                participantInfo.get(senderId)?.name ||
+                remoteParticipants.get(senderId)?.participant?.name ||
+                "Someone";
+
+            if (raised) {
+                raisedHands.add(senderId);
+                showMeetingNotification(
+                    `✋ ${name} raised their hand`
+                );
+            } else {
+                raisedHands.delete(senderId);
+                showMeetingNotification(`${name} lowered their hand`);
+            }
+
+            // Update the tile label with a small hand indicator.
+            const tile = remoteParticipants.get(senderId);
+            if (tile) {
+                const base =
+                    tile.participant?.name || name || "Participant";
+                tile.label.textContent = base + (raised ? " ✋" : "");
+            }
+
+            renderParticipantsList();
+            break;
+        }
+
+        case "screen_share": {
+            const senderId = String(data.livekit_identity || "");
+            if (!senderId || senderId === String(liveKitIdentity)) break;
+
+            const active = Boolean(data.active);
+            const name =
+                data.user_name ||
+                participantInfo.get(senderId)?.name ||
+                remoteParticipants.get(senderId)?.participant?.name ||
+                "Someone";
+
+            showMeetingNotification(
+                active
+                    ? `🖥️ ${name} started screen sharing`
+                    : `🖥️ ${name} stopped screen sharing`
+            );
+            break;
+        }
 
         case "room_full":
             alert(
@@ -2478,7 +3126,11 @@ async function connectLiveKit() {
             if (!tile) return;
 
             if (track.kind === LK.Track.Kind.Video) {
-                attachRemoteVideo(participant, track);
+                if (isScreenShareTrack(track)) {
+                    attachRemoteScreenShare(participant, track);
+                } else {
+                    attachRemoteVideo(participant, track);
+                }
             } else if (track.kind === LK.Track.Kind.Audio) {
                 attachRemoteAudio(participant, track);
             }
@@ -2488,7 +3140,14 @@ async function connectLiveKit() {
     liveKitRoom.on(
         LK.RoomEvent.TrackUnsubscribed,
         (track, publication, participant) => {
-            detachParticipantTrack(participant, track);
+            if (
+                track.kind === LK.Track.Kind.Video &&
+                isScreenShareTrack(track)
+            ) {
+                detachRemoteScreenShare(participant, track);
+            } else {
+                detachParticipantTrack(participant, track);
+            }
         }
     );
 
@@ -2500,12 +3159,17 @@ async function connectLiveKit() {
         createRemoteTile(participant);
         upsertLiveKitParticipant(participant, false);
 
+        // New: "joined" toast (fires for participants joining after us).
+        const name = participant.name || "Someone";
+        showMeetingNotification(`👤 ${name} joined the meeting`);
+
         sendLiveKitData(
             {
                 type: "participant_hello",
                 user_name: userName,
                 is_creator: isMeetingCreator,
-                canvas_enabled: Boolean(isMeetingCreator || canvasEnabled)
+                canvas_enabled: Boolean(isMeetingCreator || canvasEnabled),
+                raised_hand: raisedHands.has(liveKitIdentity)
             },
             { reliable: true, topic: "aircanvas-control" }
         );
@@ -2522,19 +3186,20 @@ async function connectLiveKit() {
         }
     });
 
-    // ------------------------------------------------------------
-    // BUG 3 FIX: also clean up the participant's permission entry
-    // and pending state when they disconnect, then re-render the
-    // host's Drawing Permissions panel so a departed guest does not
-    // linger with a stale "Give Drawing" button.
-    // ------------------------------------------------------------
     liveKitRoom.on(LK.RoomEvent.ParticipantDisconnected, (participant) => {
         const identity = String(participant.identity);
+
+        // New: "left" toast.
+        const info = participantInfo.get(identity);
+        const name =
+            participant.name || info?.name || "Someone";
+        showMeetingNotification(`👤 ${name} left the meeting`);
 
         removeRemoteTile(identity);
 
         participantInfo.delete(identity);
         drawingPermissionRequests.delete(identity);
+        raisedHands.delete(identity);
 
         const id = liveKitIdentityToUserId.get(identity);
         if (id) {
@@ -2542,10 +3207,12 @@ async function connectLiveKit() {
             userIdToLiveKitIdentity.delete(id);
             participantInfo.delete(id);
             drawingPermissionRequests.delete(id);
+            raisedHands.delete(id);
         }
 
         updateParticipantCount();
         renderDrawingPermissions();
+        renderParticipantsList();
     });
 
     await liveKitRoom.connect(
@@ -2570,7 +3237,8 @@ async function connectLiveKit() {
             type: "participant_hello",
             user_name: userName,
             is_creator: isMeetingCreator,
-            canvas_enabled: Boolean(isMeetingCreator || canvasEnabled)
+            canvas_enabled: Boolean(isMeetingCreator || canvasEnabled),
+            raised_hand: raisedHands.has(liveKitIdentity)
         },
         { reliable: true, topic: "aircanvas-control" }
     );
@@ -2599,7 +3267,17 @@ async function connectLiveKit() {
         for (const publication of participant.trackPublications.values()) {
             if (publication.isSubscribed && publication.track) {
                 if (publication.kind === LK.Track.Kind.Video) {
-                    attachRemoteVideo(participant, publication.track);
+                    if (isScreenShareTrack(publication.track)) {
+                        attachRemoteScreenShare(
+                            participant,
+                            publication.track
+                        );
+                    } else {
+                        attachRemoteVideo(
+                            participant,
+                            publication.track
+                        );
+                    }
                 } else if (publication.kind === LK.Track.Kind.Audio) {
                     attachRemoteAudio(participant, publication.track);
                 }
@@ -2821,6 +3499,29 @@ function clearCanvasButtonAction() {
 async function cleanupMeeting(stopCameraToo = true) {
     meetingActive = false;
 
+    // Stop any local screen share (do not broadcast — the room is
+    // being torn down).
+    try {
+        if (screenShareTrack) {
+            try {
+                screenShareTrack.stop();
+            } catch (_) {}
+        }
+    } catch (_) {}
+    try {
+        if (screenShareStream) {
+            screenShareStream.getTracks().forEach((t) => {
+                try {
+                    t.stop();
+                } catch (_) {}
+            });
+        }
+    } catch (_) {}
+    screenShareTrack = null;
+    screenShareStream = null;
+    isScreenSharing = false;
+    updateScreenShareUI();
+
     disconnectLiveKit();
     liveKitDataReady = false;
 
@@ -2844,6 +3545,7 @@ async function cleanupMeeting(stopCameraToo = true) {
     participantInfo.clear();
     userIdToLiveKitIdentity.clear();
     liveKitIdentityToUserId.clear();
+    raisedHands.clear();
 
     activeGesture = "no_gesture";
     activeConfidence = 0;
@@ -2852,6 +3554,9 @@ async function cleanupMeeting(stopCameraToo = true) {
 
     updateGestureDisplay("no_gesture", 0);
     updateParticipantCount();
+    updateHandRaiseButton();
+    updateLocalUI();
+    toggleReactionsMenu(false);
 
     if (meetingIdInput) meetingIdInput.value = "";
     if (meetingIdLarge) meetingIdLarge.textContent = "------";
@@ -2932,6 +3637,9 @@ window.addEventListener("beforeunload", () => {
     try {
         localStream?.getTracks().forEach((track) => track.stop());
     } catch (_) {}
+    try {
+        screenShareTrack?.stop();
+    } catch (_) {}
 });
 
 // ============================================================
@@ -2939,13 +3647,18 @@ window.addEventListener("beforeunload", () => {
 // ============================================================
 
 function initializeApplication() {
+    ensureFeatureStyles();
     initializeMeetingPanels();
+    ensureExtraControls();
+    ensureNotificationsContainer();
     updateLocalUI();
     setupCanvasSizes();
     observeVideoContainerSize();
     hideLegacyRemoteCard();
     updateParticipantCount();
     updateCanvasAvailability();
+    updateHandRaiseButton();
+    updateScreenShareUI();
     setConnectionStatus("Disconnected");
 
     if (meetingScreen) {
