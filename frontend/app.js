@@ -25,7 +25,7 @@ const DRAW_SEND_INTERVAL_MS = 30;
 const CLEAR_COOLDOWN_MS = 700;
 const DRAWING_HISTORY_CHUNK_SIZE = 30;
 
-// "Raise Hand" now lives inside the Reactions menu.
+// "Raise Hand" lives inside the Reactions menu.
 const REACTION_OPTIONS = ["👍", "❤️", "😂", "😮", "🎉", "👋"];
 const NOTIFICATION_LIFETIME_MS = 3000;
 
@@ -50,7 +50,7 @@ const remoteCanvas = document.getElementById("remoteCanvas");
 const remoteAudio = document.getElementById("remoteAudio");
 const airCanvas = document.getElementById("airCanvas");
 const landmarkCanvas = document.getElementById("landmarkCanvas");
-// Gesture / Confidence UI is intentionally absent — these stay null and
+// Gesture / Confidence UI intentionally absent — these stay null and
 // every reference is null-guarded so MediaPipe runs exactly as before.
 const gestureDisplay = document.getElementById("gesture");
 const confidenceDisplay = document.getElementById("confidence");
@@ -421,7 +421,7 @@ function renderParticipantsList() {
 }
 
 // ============================================================
-// LOCAL UI LABEL  (was missing — this is the fix)
+// UI HELPERS  (local label + screen switching)
 // ============================================================
 
 function updateLocalUI() {
@@ -430,6 +430,16 @@ function updateLocalUI() {
         localParticipantLabel.textContent =
             (userName || "You") + (raised ? " ✋" : "");
     }
+}
+
+function showHome() {
+    if (homeScreen) homeScreen.classList.remove("hidden");
+    if (meetingScreen) meetingScreen.classList.add("hidden");
+}
+
+function showMeeting() {
+    if (homeScreen) homeScreen.classList.add("hidden");
+    if (meetingScreen) meetingScreen.classList.remove("hidden");
 }
 
 function initializeMeetingPanels() {
@@ -529,7 +539,6 @@ function ensureFeatureStyles() {
             transform: scale(1.08);
         }
 
-        /* Divider + Raise Hand row below the emoji grid */
         .reactions-menu .reaction-sep {
             grid-column: 1 / -1;
             height: 1px;
@@ -550,6 +559,7 @@ function ensureFeatureStyles() {
             font-weight: 600;
             color: #1a2430;
             border-radius: 8px;
+            cursor: pointer;
         }
         .reactions-menu .reaction-hand::before {
             content: "✋";
@@ -820,7 +830,7 @@ function toggleReactionsMenu(force) {
 }
 
 // Wire up pre-existing toolbar buttons. Hand / Reactions / Share are
-// already present in the new toolbar HTML; we only wire them.
+// already present in the toolbar HTML; we only wire them.
 function ensureExtraControls() {
     const group = document.querySelector(".toolbar-center");
     if (!group) return;
@@ -1175,7 +1185,6 @@ function initDrawingPermissionsPopover() {
     }
 }
 
-// Renders content into the host-only popover. Safe to call at any time.
 function renderDrawingPermissions() {
     const content = document.getElementById("drawingPermissionsContent");
     if (!content) return;
@@ -1478,7 +1487,7 @@ function setupLocalCardControls() {
 }
 
 // ============================================================
-// HAND RAISE  (now triggered from inside the Reactions menu)
+// HAND RAISE  (triggered from inside the Reactions menu)
 // ============================================================
 
 function toggleRaiseHand() {
@@ -1501,8 +1510,8 @@ function toggleRaiseHand() {
 }
 
 function updateHandRaiseButton() {
-    // No standalone toolbar button any more — raise hand lives in the
-    // reactions menu. Keep the function so other callers stay safe.
+    // No standalone toolbar button — raise hand lives in the reactions
+    // menu. Kept so any future caller stays safe.
     const btn = document.getElementById("handRaiseButton");
     if (!btn) return;
     const raised = raisedHands.has(liveKitIdentity);
@@ -1721,7 +1730,7 @@ function updateCanvasAvailability() {
         clearCanvasBtn.style.opacity = canClear ? "1" : "0.45";
     }
 
-    // Gesture / Confidence UI is gone — these guards keep (now-null)
+    // Gesture / Confidence UI gone — these guards keep (now-null)
     // references safe.
     if (gestureDisplay && !canDraw) gestureDisplay.textContent = "VIEW ONLY";
     if (confidenceDisplay && !canDraw) confidenceDisplay.textContent = "--";
@@ -2336,8 +2345,7 @@ function onResults(results) {
 
     // Drawing happens only when the DRAW switch is ON.
     // The "erase" path still works — the gesture pipeline decides
-    // when the erase gesture is being made. The user just adjusts
-    // the eraser size in the popover.
+    // when the erase gesture is being made.
     if (!drawingToolEnabled) {
         resetDrawingState();
     } else if (activeGesture === "draw") {
