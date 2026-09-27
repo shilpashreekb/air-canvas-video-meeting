@@ -25,7 +25,6 @@ const DRAW_SEND_INTERVAL_MS = 30;
 const CLEAR_COOLDOWN_MS = 700;
 const DRAWING_HISTORY_CHUNK_SIZE = 30;
 
-// Reactions visible to the user, in this exact order.
 const REACTION_OPTIONS = ["👍", "👏", "😂", "😮", "❤️", "🎉"];
 const NOTIFICATION_LIFETIME_MS = 3000;
 
@@ -40,6 +39,8 @@ const joinMeetingButton = document.getElementById("joinMeetingButton");
 const meetingIdDisplay = document.getElementById("meetingIdDisplay");
 const meetingIdLarge = document.getElementById("meetingIdLarge");
 const copyMeetingId = document.getElementById("copyMeetingId");
+// connectionStatus element was removed from the visible header.
+// Kept as a null-safe lookup so nothing breaks.
 const connectionStatus = document.getElementById("connectionStatus");
 const localParticipantLabel = document.getElementById("localParticipantLabel");
 const remoteParticipantLabel = document.getElementById("remoteParticipantLabel");
@@ -50,7 +51,6 @@ const remoteCanvas = document.getElementById("remoteCanvas");
 const remoteAudio = document.getElementById("remoteAudio");
 const airCanvas = document.getElementById("airCanvas");
 const landmarkCanvas = document.getElementById("landmarkCanvas");
-// Gesture / Confidence UI intentionally absent — null-guarded everywhere.
 const gestureDisplay = document.getElementById("gesture");
 const confidenceDisplay = document.getElementById("confidence");
 const startCameraBtn = document.getElementById("startCamera");
@@ -104,17 +104,15 @@ let isCameraOff = false;
 let liveKitIdentity =
     "aircanvas-" + Math.random().toString(36).substring(2, 10);
 
-// ----- Theme state -------------------------------------------
 let currentTheme = localStorage.getItem("airCanvasTheme") || "light";
 
-// ----- Feature state -----------------------------------------
 const raisedHands = new Set();
 let isScreenSharing = false;
 let screenShareStream = null;
 let screenShareTrack = null;
 
-// ----- Pin / fullscreen state --------------------------------
 let pinnedIdentity = null;
+let currentPage = 1;
 
 let hands = null;
 let camera = null;
@@ -171,6 +169,7 @@ function clamp(value, min, max) {
 }
 
 function setConnectionStatus(text) {
+    // Badge removed from UI. Kept as a no-op for compatibility.
     if (connectionStatus) connectionStatus.textContent = `Backend: ${text}`;
 }
 
@@ -183,6 +182,7 @@ function updateParticipantCount() {
             `${count} participant${count === 1 ? "" : "s"}`;
     }
     renderParticipantsList();
+    applyPagination();
 }
 
 function getInitials(name) {
@@ -417,7 +417,7 @@ function renderParticipantsList() {
 }
 
 // ============================================================
-// UI HELPERS  (local label + screen switching)
+// UI HELPERS
 // ============================================================
 
 function updateLocalUI() {
@@ -436,6 +436,108 @@ function showHome() {
 function showMeeting() {
     if (homeScreen) homeScreen.classList.add("hidden");
     if (meetingScreen) meetingScreen.classList.remove("hidden");
+}
+
+
+// ============================================================
+// PAGINATION (max 4 on desktop, max 3 on mobile)
+// ============================================================
+
+function getPerPage() {
+    return window.innerWidth <= 640 ? 3 : 4;
+}
+
+function updatePaginationUI(page, totalPages) {
+    const bar = document.getElementById("paginationBar");
+    if (!bar) return;
+
+    // Hide bar when pinned or only 1 page
+    if (pinnedIdentity || totalPages <= 1) {
+        bar.classList.add("hidden");
+        return;
+    }
+    bar.classList.remove("hidden");
+
+    const indicator = document.getElementById("pageIndicator");
+    if (indicator) indicator.textContent = `${page} / ${totalPages}`;
+
+    const prev = document.getElementById("prevPageBtn");
+    const next = document.getElementById("nextPageBtn");
+    if (prev) prev.disabled = page <= 1;
+    if (next) next.disabled = page >= totalPages;
+}
+
+function applyPagination() {
+    if (!participantsGrid) return;
+
+    const cards = [...participantsGrid.querySelectorAll(".participant-card")];
+    const perPage = getPerPage();
+    const totalPages = Math.max(1, Math.ceil(cards.length / perPage));
+
+    if (currentPage > totalPages) currentPage = totalPages;
+    if (currentPage < 1) currentPage = 1;
+
+    const start = (currentPage - 1) * perPage;
+    const end = start + perPage;
+
+    cards.forEach((card, i) => {
+        const visible = i >= start && i < end;
+        card.classList.toggle("page-hidden", !visible);
+    });
+
+    const visibleCount = Math.min(perPage, Math.max(0, cards.length - start));
+
+    // Remove grid-span-2 from all cards first
+    cards.forEach((c) => c.classList.remove("grid-span-2"));
+
+    // For 3-tile case on desktop, add grid-span-2 to the last visible card
+    const isDesktop = window.innerWidth > 640;
+    if (isDesktop && visibleCount === 3) {
+        const visible = cards.slice(start, end);
+        if (visible[2]) visible[2].classList.add("grid-span-2");
+    }
+
+    // Set data-count so CSS can pick the right grid template
+    participantsGrid.setAttribute("data-count", String(visibleCount));
+
+    updatePaginationUI(currentPage, totalPages);
+
+    // Recompute canvas sizes for any newly visible tiles
+    requestAnimationFrame(() => {
+        try { setupCanvasSizes(); } catch (_) {}
+    });
+}
+
+function goToPage(page) {
+    const cards = participantsGrid
+        ? [...participantsGrid.querySelectorAll(".participant-card")].length
+        : 0;
+    const perPage = getPerPage();
+    const totalPages = Math.max(1, Math.ceil(cards / perPage));
+    currentPage = clamp(Number(page) || 1, 1, totalPages);
+    applyPagination();
+}
+
+function initPaginationControls() {
+    const prev = document.getElementById("prevPageBtn");
+    const next = document.getElementById("nextPageBtn");
+
+    if (prev && !prev.dataset.wired) {
+        prev.dataset.wired = "true";
+        prev.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            goToPage(currentPage - 1);
+        });
+    }
+    if (next && !next.dataset.wired) {
+        next.dataset.wired = "true";
+        next.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            goToPage(currentPage + 1);
+        });
+    }
+
+    applyPagination();
 }
 
 
@@ -507,7 +609,7 @@ function initializeMeetingPanels() {
 }
 
 // ============================================================
-// FEATURE STYLES / NOTIFICATIONS / REACTIONS / EXTRA CONTROLS
+// FEATURE STYLES
 // ============================================================
 
 function ensureFeatureStyles() {
@@ -516,8 +618,6 @@ function ensureFeatureStyles() {
     const style = document.createElement("style");
     style.id = "airCanvasFeatureStyles";
     style.textContent = `
-        /* Centered, professional meeting notifications.
-           Colours inherit from the active theme. */
         .meeting-notifications {
             position: fixed;
             top: 14%;
@@ -558,7 +658,6 @@ function ensureFeatureStyles() {
             transform: translateY(-10px);
         }
 
-        /* Reactions menu — themed popover grid */
         .reactions-menu {
             position: fixed;
             z-index: 9998;
@@ -609,8 +708,7 @@ function ensureFeatureStyles() {
             color: var(--text);
             border-radius: 8px;
             cursor: pointer;
-            transition: background 0.15s ease, border-color 0.15s ease,
-                        color 0.15s ease;
+            transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
         }
         .reactions-menu .reaction-hand::before {
             content: "✋";
@@ -629,7 +727,6 @@ function ensureFeatureStyles() {
             content: "🖐️";
         }
 
-        /* Reaction bubble on a video tile */
         .reaction-bubble {
             position: absolute;
             bottom: 12px;
@@ -651,8 +748,6 @@ function ensureFeatureStyles() {
             transform: translateY(-20px) scale(1.15);
         }
 
-        /* Remote screen share overlay. transform: none overrides the
-           mirroring rule so shared screens are never horizontally flipped. */
         .remote-video-container .remote-screenshare-video {
             position: absolute;
             inset: 0;
@@ -693,7 +788,8 @@ function ensureFeatureStyles() {
         }
         .participant-card:hover .card-controls,
         .participant-card:fullscreen .card-controls,
-        .participant-card:-webkit-full-screen .card-controls {
+        .participant-card:-webkit-full-screen .card-controls,
+        .participant-card.fit-active .card-controls {
             opacity: 1;
             pointer-events: auto;
         }
@@ -719,15 +815,12 @@ function ensureFeatureStyles() {
             color: #fff;
         }
 
-        .participants-grid.has-pinned {
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        }
-        .participants-grid.has-pinned .pinned-card {
-            grid-column: 1 / -1;
-            border-color: var(--accent);
-            box-shadow: 0 0 0 1px var(--accent-soft);
+        .participants-grid.has-pinned .pinned-card .card-controls {
+            opacity: 1 !important;
+            pointer-events: auto !important;
         }
 
+        /* Native fullscreen card (desktop behaviour preserved) */
         .participant-card:fullscreen,
         .participant-card:-webkit-full-screen {
             width: 100vw;
@@ -806,7 +899,7 @@ function showMeetingNotification(text, opts = {}) {
     }, lifetime);
 }
 
-// ---------- REACTIONS MENU (includes Raise Hand) ----------
+// ---------- REACTIONS MENU ----------
 
 function ensureReactionsMenu() {
     let menu = document.getElementById("reactionsMenu");
@@ -1257,7 +1350,6 @@ function renderDrawingPermissions() {
         drawingPermissionRequests.has(String(id))
     );
 
-    // ----- Requests -----
     const reqTitle = document.createElement("div");
     reqTitle.className = "perm-section-title";
     reqTitle.textContent = `Requests (${requestGuests.length})`;
@@ -1332,7 +1424,6 @@ function renderDrawingPermissions() {
         });
     }
 
-    // ----- Approved -----
     const appTitle = document.createElement("div");
     appTitle.className = "perm-section-title";
     appTitle.textContent =
@@ -1368,8 +1459,6 @@ function renderDrawingPermissions() {
             );
 
             btn.addEventListener("click", () => {
-                // Only revokes DRAWING permission — never touches video,
-                // tracks, or side panels.
                 sendWS({
                     type: "revoke_drawing",
                     target_user_id: targetIdentity,
@@ -1407,6 +1496,7 @@ function addCardControls(card, identity) {
     pinBtn.textContent = "📌";
     pinBtn.addEventListener("click", (ev) => {
         ev.stopPropagation();
+        ev.preventDefault();
         togglePin(identity);
     });
 
@@ -1417,6 +1507,7 @@ function addCardControls(card, identity) {
     fitBtn.textContent = "⛶";
     fitBtn.addEventListener("click", (ev) => {
         ev.stopPropagation();
+        ev.preventDefault();
         toggleFullscreen(card);
     });
 
@@ -1428,6 +1519,7 @@ function addCardControls(card, identity) {
     restoreBtn.style.display = "none";
     restoreBtn.addEventListener("click", (ev) => {
         ev.stopPropagation();
+        ev.preventDefault();
         exitFullscreen();
     });
 
@@ -1467,6 +1559,7 @@ function applyPinState() {
 
     if (!pinnedIdentity) {
         participantsGrid.classList.remove("has-pinned");
+        applyPagination();
         return;
     }
 
@@ -1479,6 +1572,8 @@ function applyPinState() {
 
     if (pinnedCard) {
         pinnedCard.classList.add("pinned-card");
+        pinnedCard.classList.remove("page-hidden");
+        pinnedCard.classList.remove("grid-span-2");
         participantsGrid.classList.add("has-pinned");
         const pinBtn = pinnedCard.querySelector(".pin-btn");
         if (pinBtn) {
@@ -1489,48 +1584,86 @@ function applyPinState() {
         pinnedIdentity = null;
         participantsGrid.classList.remove("has-pinned");
     }
+
+    applyPagination();
+    requestAnimationFrame(() => {
+        try { setupCanvasSizes(); } catch (_) {}
+    });
 }
 
 function toggleFullscreen(element) {
     if (!element) return;
-    const doc = document;
-    const currentFull = doc.fullscreenElement || doc.webkitFullscreenElement;
-    if (currentFull === element) { exitFullscreen(); return; }
 
-    if (element.requestFullscreen) {
-        element.requestFullscreen().catch((err) => {
-            console.warn("Fullscreen request failed:", err);
-        });
-    } else if (element.webkitRequestFullscreen) {
-        element.webkitRequestFullscreen();
+    // Already in CSS-fit mode → exit it.
+    if (element.classList.contains("fit-active")) {
+        element.classList.remove("fit-active");
+        document.body.classList.remove("has-fit-active");
+        updateFitButtonVisibility();
+        setTimeout(() => { try { setupCanvasSizes(); } catch (_) {} }, 50);
+        return;
     }
+
+    // Try native fullscreen first (best experience on desktop).
+    let nativeAttempt = null;
+    if (element.requestFullscreen) {
+        nativeAttempt = element.requestFullscreen();
+    } else if (element.webkitRequestFullscreen) {
+        try {
+            element.webkitRequestFullscreen();
+            setTimeout(updateFitButtonVisibility, 100);
+            return;
+        } catch (_) { nativeAttempt = Promise.reject(); }
+    } else {
+        nativeAttempt = Promise.reject();
+    }
+
+    Promise.resolve(nativeAttempt)
+        .then(() => {
+            setTimeout(updateFitButtonVisibility, 100);
+        })
+        .catch(() => {
+            // Fallback: CSS-based fullscreen. Works on mobile / iOS
+            // where native requestFullscreen is unsupported for divs.
+            element.classList.add("fit-active");
+            document.body.classList.add("has-fit-active");
+            updateFitButtonVisibility();
+            setTimeout(() => { try { setupCanvasSizes(); } catch (_) {} }, 50);
+        });
 }
 
 function exitFullscreen() {
+    // Clear CSS-fit
+    document.querySelectorAll(".participant-card.fit-active").forEach((card) => {
+        card.classList.remove("fit-active");
+    });
+    document.body.classList.remove("has-fit-active");
+
+    // Clear native fullscreen
     const doc = document;
     if (doc.fullscreenElement && doc.exitFullscreen) {
         doc.exitFullscreen().catch(() => {});
     } else if (doc.webkitFullscreenElement && doc.webkitExitFullscreen) {
         doc.webkitExitFullscreen();
     }
+
+    updateFitButtonVisibility();
+    setTimeout(() => { try { setupCanvasSizes(); } catch (_) {} }, 50);
+}
+
+function updateFitButtonVisibility() {
+    const fullEl = document.fullscreenElement || document.webkitFullscreenElement;
+    document.querySelectorAll(".participant-card").forEach((card) => {
+        const restore = card.querySelector(".restore-btn");
+        const fit = card.querySelector(".fit-btn");
+        if (!restore || !fit) return;
+        const isFit = card.classList.contains("fit-active") || fullEl === card;
+        restore.style.display = isFit ? "flex" : "none";
+        fit.style.display = isFit ? "none" : "flex";
+    });
 }
 
 function handleFullscreenChange() {
-    const doc = document;
-    const fullEl = doc.fullscreenElement || doc.webkitFullscreenElement;
-
-    document.querySelectorAll(".participant-card").forEach((card) => {
-        const restoreBtn = card.querySelector(".restore-btn");
-        const fitBtn = card.querySelector(".fit-btn");
-        if (!restoreBtn || !fitBtn) return;
-        if (fullEl === card) {
-            restoreBtn.style.display = "flex";
-            fitBtn.style.display = "none";
-        } else {
-            restoreBtn.style.display = "none";
-            fitBtn.style.display = "flex";
-        }
-    });
+    updateFitButtonVisibility();
 }
 
 function setupLocalCardControls() {
@@ -2035,6 +2168,7 @@ function createRemoteTile(participant) {
     requestAnimationFrame(() => {
         resizeRemoteCanvas(tile);
         flushPendingRemoteDrawingHistory(identity);
+        applyPagination();
     });
     requestAnimationFrame(() => resizeRemoteCanvas(tile));
 
@@ -2044,6 +2178,7 @@ function createRemoteTile(participant) {
     }
 
     updateParticipantCount();
+    applyPagination();
     return tile;
 }
 
@@ -2077,11 +2212,13 @@ function removeRemoteTile(identity) {
     updateParticipantCount();
 
     if (pinnedIdentity === key) unpinParticipant();
+    applyPagination();
 }
 
 function clearRemoteTiles() {
     [...remoteParticipants.keys()].forEach(removeRemoteTile);
     updateParticipantCount();
+    applyPagination();
 }
 
 function attachRemoteVideo(participant, track) {
@@ -2449,7 +2586,7 @@ function resetDrawingState() {
 }
 
 // ============================================================
-// LOCAL DRAWING (coordinates unchanged; colour/size driven by UI)
+// LOCAL DRAWING (coordinates unchanged)
 // ============================================================
 
 function drawGesture(values) {
@@ -2699,7 +2836,7 @@ function sendDrawingHistoryTo(targetIdentity) {
 }
 
 // ============================================================
-// REMOTE DRAWING (X-flip unchanged; colour/width optional)
+// REMOTE DRAWING (UNCHANGED)
 // ============================================================
 
 function resolveRemoteIdentity(data) {
@@ -3004,7 +3141,6 @@ function handleWebSocketMessage(data) {
             break;
         }
 
-        // -------- Request to Draw (host receives) --------
         case "request_drawing":
         case "drawing_permission_request": {
             if (!isMeetingCreator) break;
@@ -3025,9 +3161,7 @@ function handleWebSocketMessage(data) {
             break;
         }
 
-        // -------- Participant received a rejection --------
         case "drawing_permission_denied": {
-            // Only relevant to the requesting participant.
             const targetId = String(
                 data.target_livekit_identity ||
                     data.target_user_id ||
@@ -3113,8 +3247,6 @@ function handleWebSocketMessage(data) {
             if (isMeetingCreator) drawingPermissionRequests.delete(id);
 
             if (id === String(userId) || id === String(liveKitIdentity)) {
-                // ONLY revokes drawing — video, mic, tracks, side panels
-                // are never touched here.
                 canvasEnabled = false;
                 drawingPermissionRequested = false;
                 if (landmarkCanvas) clearCanvasElement(landmarkCanvas);
@@ -3253,7 +3385,6 @@ function handleWebSocketMessage(data) {
             break;
         }
 
-        // -------- HOST ENDS MEETING --------
         case "end_meeting": {
             const senderId = String(
                 data.livekit_identity || data.user_id || ""
@@ -3261,7 +3392,6 @@ function handleWebSocketMessage(data) {
             if (!senderId || senderId === String(liveKitIdentity)) break;
 
             showMeetingNotification("Meeting ended by host");
-            // Give the notification a moment before tearing everything down.
             setTimeout(async () => {
                 await cleanupMeeting(true);
                 showHome();
@@ -3550,8 +3680,11 @@ function setupMeetingUI() {
 
     setupLocalCardControls();
     initTheme();
+    initPaginationControls();
 
     if (leaveMeetingBtn) leaveMeetingBtn.disabled = false;
+
+    applyPagination();
 }
 
 async function createMeeting() {
@@ -3695,6 +3828,7 @@ async function cleanupMeeting(stopCameraToo = true) {
     try { exitFullscreen(); } catch (_) {}
 
     pinnedIdentity = null;
+    currentPage = 1;
     try { applyPinState(); } catch (_) {}
 
     disconnectLiveKit();
@@ -3793,7 +3927,6 @@ async function endMeetingForAll() {
     );
     if (!confirmed) return;
 
-    // Broadcast first, then clean up locally.
     sendWS({
         type: "end_meeting",
         meeting_id: meetingId,
@@ -3802,7 +3935,6 @@ async function endMeetingForAll() {
         livekit_identity: liveKitIdentity
     });
 
-    // Give the data channel a beat to flush before we tear the room down.
     await new Promise((r) => setTimeout(r, 150));
 
     await cleanupMeeting(true);
@@ -3823,7 +3955,7 @@ async function endMeetingForAll() {
 }
 
 // ============================================================
-// BUTTONS (defensive — never throws)
+// BUTTONS
 // ============================================================
 
 function wireButton(id, handler) {
@@ -3846,20 +3978,28 @@ meetingIdInput?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") joinMeeting();
 });
 
+// Re-apply pagination on resize (debounced) & recompute canvas sizes.
+let __resizeTimer = null;
 window.addEventListener("resize", () => {
     setupCanvasSizes();
+
     const moreMenu = document.getElementById("moreMenu");
-    if (moreMenu && !moreMenu.classList.contains("hidden")) {
-        positionMoreMenu();
-    }
+    if (moreMenu && !moreMenu.classList.contains("hidden")) positionMoreMenu();
+
     const perms = document.getElementById("drawingPermissionsPopover");
     if (perms && !perms.classList.contains("hidden")) {
         positionDrawingPermissionsPopover();
     }
+
     const reactions = document.getElementById("reactionsMenu");
     if (reactions && !reactions.classList.contains("hidden")) {
         positionReactionsMenu(reactions);
     }
+
+    if (__resizeTimer) clearTimeout(__resizeTimer);
+    __resizeTimer = setTimeout(() => {
+        applyPagination();
+    }, 120);
 });
 
 document.addEventListener("fullscreenchange", handleFullscreenChange);
@@ -3884,6 +4024,7 @@ function initializeApplication() {
     initMoreMenu();
     initDrawingControls();
     initDrawingPermissionsPopover();
+    initPaginationControls();
     ensureNotificationsContainer();
     updateLocalUI();
     setupCanvasSizes();
@@ -3898,6 +4039,7 @@ function initializeApplication() {
     setConnectionStatus("Disconnected");
 
     setupLocalCardControls();
+    applyPagination();
 
     if (meetingScreen) meetingScreen.classList.add("hidden");
     if (homeScreen) homeScreen.classList.remove("hidden");
