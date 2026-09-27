@@ -440,18 +440,17 @@ function showMeeting() {
 
 
 // ============================================================
-// PAGINATION (max 4 on desktop, max 3 on mobile)
+// PAGINATION (max 4 on desktop, max 2 on mobile)
 // ============================================================
 
 function getPerPage() {
-    return window.innerWidth <= 640 ? 3 : 4;
+    return window.innerWidth <= 640 ? 2 : 4;
 }
 
 function updatePaginationUI(page, totalPages) {
     const bar = document.getElementById("paginationBar");
     if (!bar) return;
 
-    // Hide bar when pinned or only 1 page
     if (pinnedIdentity || totalPages <= 1) {
         bar.classList.add("hidden");
         return;
@@ -502,7 +501,6 @@ function applyPagination() {
 
     updatePaginationUI(currentPage, totalPages);
 
-    // Recompute canvas sizes for any newly visible tiles
     requestAnimationFrame(() => {
         try { setupCanvasSizes(); } catch (_) {}
     });
@@ -820,7 +818,7 @@ function ensureFeatureStyles() {
             pointer-events: auto !important;
         }
 
-        /* Native fullscreen card (desktop behaviour preserved) */
+        /* Native fullscreen card */
         .participant-card:fullscreen,
         .participant-card:-webkit-full-screen {
             width: 100vw;
@@ -2008,21 +2006,30 @@ function resizeRemoteCanvas(tile) {
 }
 
 // ============================================================
-// LANDMARK -> CANVAS PIXEL (UNCHANGED)
+// LANDMARK -> CANVAS PIXEL
 // ============================================================
 
 function getVideoCoverTransform() {
     const container = video?.parentElement;
     if (!container) return null;
+
     const cw = container.clientWidth;
     const ch = container.clientHeight;
     const vw = video.videoWidth;
     const vh = video.videoHeight;
     if (!cw || !ch || !vw || !vh) return null;
 
-    const scale = Math.max(cw / vw, ch / vh);
+    // Matches the CSS object-fit: contain applied to the video element.
+    // The video is scaled DOWN to fit fully inside the container,
+    // preserving aspect ratio, with equal letterbox bars. Portrait
+    // / mobile videos therefore display completely (no crop) and
+    // hand landmarks stay precisely aligned with what the user sees,
+    // because both the visual fit AND the landmark → pixel math use
+    // the same scale factor.
+    const scale = Math.min(cw / vw, ch / vh);
     const dispW = vw * scale;
     const dispH = vh * scale;
+
     return {
         scale,
         offsetX: (cw - dispW) / 2,
@@ -2116,7 +2123,8 @@ function createRemoteTile(participant) {
     remoteVid.setAttribute("playsinline", "");
     remoteVid.style.width = "100%";
     remoteVid.style.height = "100%";
-    remoteVid.style.objectFit = "cover";
+    remoteVid.style.objectFit = "contain";
+    remoteVid.style.background = "#000";
     remoteVid.style.transform = "scaleX(-1)";
     remoteVid.style.display = "block";
     remoteVid.style.visibility = "visible";
@@ -2586,7 +2594,7 @@ function resetDrawingState() {
 }
 
 // ============================================================
-// LOCAL DRAWING (coordinates unchanged)
+// LOCAL DRAWING
 // ============================================================
 
 function drawGesture(values) {
@@ -2836,7 +2844,7 @@ function sendDrawingHistoryTo(targetIdentity) {
 }
 
 // ============================================================
-// REMOTE DRAWING (UNCHANGED)
+// REMOTE DRAWING
 // ============================================================
 
 function resolveRemoteIdentity(data) {
