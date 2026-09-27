@@ -17,8 +17,8 @@ const WS_URL =
 const LIVEKIT_SERVER_URL = "wss://air-canvas-3zfbpfwj.livekit.cloud";
 const LIVEKIT_TOKEN_SERVER_ID = "aircanvas-sixxay";
 
-const MAX_PARTICIPANTS = 100;      // <-- was 5
-const MAX_GUEST_DRAWERS = 3;       // <-- was 2 (exactly 3 drawing slots)
+const MAX_PARTICIPANTS = 100;      // <-- meeting capacity (unchanged)
+const MAX_GUEST_DRAWERS = 3;       // <-- exactly 3 guest drawing slots
 
 const PREDICTION_INTERVAL_MS = 80;
 const DRAW_SEND_INTERVAL_MS = 30;
@@ -49,6 +49,8 @@ const remoteCanvas = document.getElementById("remoteCanvas");
 const remoteAudio = document.getElementById("remoteAudio");
 const airCanvas = document.getElementById("airCanvas");
 const landmarkCanvas = document.getElementById("landmarkCanvas");
+// NOTE: the visible Gesture / Confidence panel was removed from the UI.
+// These lookups now return null; every use is null-guarded.
 const gestureDisplay = document.getElementById("gesture");
 const confidenceDisplay = document.getElementById("confidence");
 const startCameraBtn = document.getElementById("startCamera");
@@ -133,6 +135,16 @@ let lastDrawSendTime = 0;
 let lastSentDrawX = null;
 let lastSentDrawY = null;
 let localDrawingHistory = [];
+
+// ----- Drawing tool UI state ---------------------------------
+// These ONLY control what the existing drawing engine draws.
+// They do NOT change landmark normalization, canvas mapping,
+// coordinate conversion, or the synchronisation format.
+let drawingToolEnabled = false;      // DRAW ON / OFF
+let drawingColor = "#00ff00";        // stroke colour
+let drawingThickness = 3;            // stroke width
+let eraserEnabled = false;           // eraser mode
+let eraserSize = 20;                 // eraser radius
 
 const remoteParticipants = new Map();
 const userIdToLiveKitIdentity = new Map();
@@ -265,7 +277,6 @@ function appendChatMessage(data) {
     const chatIsOpen = chatPanel && !chatPanel.classList.contains("hidden");
     if (!chatIsOpen && senderId !== String(userId)) {
         setChatUnreadCount(chatUnreadCount + 1);
-        // Temporary toast — now includes the actual message text.
         if (senderId) {
             showMeetingNotification(`💬 ${senderName}: ${text}`);
         }
@@ -792,6 +803,155 @@ function ensureExtraControls() {
 }
 
 // ============================================================
+// DRAWING TOOL CONTROLS  (UI ONLY — does not touch drawing math)
+// ============================================================
+
+function applyDrawingControlUI() {
+    const onOffBtn = document.getElementById("drawOnOff");
+    if (onOffBtn) {
+        onOffBtn.classList.toggle("on", drawingToolEnabled);
+        onOffBtn.setAttribute(
+            "aria-pressed", drawingToolEnabled ? "true" : "false"
+        );
+        const t = onOffBtn.querySelector(".draw-switch-text");
+        if (t) t.textContent = drawingToolEnabled ? "ON" : "OFF";
+    }
+
+    const eraserBtn = document.getElementById("eraserToggle");
+    if (eraserBtn) {
+        eraserBtn.classList.toggle("on", eraserEnabled);
+        eraserBtn.setAttribute(
+            "aria-pressed", eraserEnabled ? "true" : "false"
+        );
+        const t = eraserBtn.querySelector(".draw-switch-text");
+        if (t) t.textContent = eraserEnabled ? "ON" : "OFF";
+    }
+
+    document.querySelectorAll("#colorSwatches .color-swatch")
+        .forEach((swatch) => {
+            swatch.classList.toggle(
+                "active",
+                String(swatch.dataset.color || "").toLowerCase() ===
+                    String(drawingColor).toLowerCase()
+            );
+        });
+
+    document.querySelectorAll("#sizeOptions .size-option")
+        .forEach((option) => {
+            option.classList.toggle(
+                "active",
+                Number(option.dataset.size) === Number(drawingThickness)
+            );
+        });
+
+    const toggleBtn = document.getElementById("drawToggleButton");
+    if (toggleBtn) toggleBtn.classList.toggle("active", drawingToolEnabled);
+}
+
+function setDrawToolEnabled(enabled) {
+    drawingToolEnabled = Boolean(enabled);
+    if (!drawingToolEnabled) resetDrawingState();
+    applyDrawingControlUI();
+}
+
+function setEraserEnabled(enabled) {
+    eraserEnabled = Boolean(enabled);
+    resetDrawingState();
+    applyDrawingControlUI();
+}
+
+function setDrawingColor(color) {
+    if (typeof color === "string" && color) drawingColor = color;
+    // Choosing a colour naturally leaves eraser mode.
+    eraserEnabled = false;
+    applyDrawingControlUI();
+}
+
+function setDrawingThickness(size) {
+    const value = Number(size);
+    if (Number.isFinite(value) && value > 0) drawingThickness = value;
+    applyDrawingControlUI();
+}
+
+function toggleDrawPanel(force) {
+    const panel = document.getElementById("drawPanel");
+    if (!panel) return;
+    const shouldShow = typeof force === "boolean"
+        ? force : panel.classList.contains("hidden");
+    panel.classList.toggle("hidden", !shouldShow);
+}
+
+function closeDrawPanel() {
+    const panel = document.getElementById("drawPanel");
+    if (panel) panel.classList.add("hidden");
+}
+
+function initDrawingControls() {
+    const panel = document.getElementById("drawPanel");
+    const toggleBtn = document.getElementById("drawToggleButton");
+    if (!panel || !toggleBtn) return;
+    if (panel.dataset.wired === "true") {
+        applyDrawingControlUI();
+        return;
+    }
+    panel.dataset.wired = "true";
+
+    toggleBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        toggleDrawPanel();
+    });
+
+    document.getElementById("drawPanelClose")
+        ?.addEventListener("click", closeDrawPanel);
+
+    document.getElementById("drawOnOff")
+        ?.addEventListener("click", () => {
+            setDrawToolEnabled(!drawingToolEnabled);
+        });
+
+    document.getElementById("eraserToggle")
+        ?.addEventListener("click", () => {
+            setEraserEnabled(!eraserEnabled);
+        });
+
+    const eraserRange = document.getElementById("eraserSizeRange");
+    if (eraserRange) {
+        eraserRange.value = String(eraserSize);
+        eraserRange.addEventListener("input", () => {
+            eraserSize = clamp(Number(eraserRange.value) || 20, 8, 80);
+        });
+    }
+
+    document.querySelectorAll("#colorSwatches .color-swatch")
+        .forEach((swatch) => {
+            swatch.addEventListener("click", () => {
+                setDrawingColor(swatch.dataset.color || "#00ff00");
+            });
+        });
+
+    document.querySelectorAll("#sizeOptions .size-option")
+        .forEach((option) => {
+            option.addEventListener("click", () => {
+                setDrawingThickness(Number(option.dataset.size) || 3);
+            });
+        });
+
+    if (!window.__airCanvasDrawOutsideClickBound) {
+        window.__airCanvasDrawOutsideClickBound = true;
+        document.addEventListener("click", (event) => {
+            const p = document.getElementById("drawPanel");
+            if (!p || p.classList.contains("hidden")) return;
+            if (p.contains(event.target)) return;
+            if (event.target.closest &&
+                event.target.closest("#drawToggleButton")) return;
+            closeDrawPanel();
+        });
+    }
+
+    applyDrawingControlUI();
+}
+
+// ============================================================
 // PIN / FIT-TO-SCREEN / CARD CONTROLS
 // ============================================================
 
@@ -1202,8 +1362,19 @@ function updateCanvasAvailability() {
             : "You have nothing to clear.";
     }
 
+    // Gesture / Confidence panel was removed from the UI.
+    // These guards keep the (now-null) references safe.
     if (gestureDisplay && !canDraw) gestureDisplay.textContent = "VIEW ONLY";
     if (confidenceDisplay && !canDraw) confidenceDisplay.textContent = "--";
+
+    // Show the DRAW button only when the user may draw.
+    const drawBtn = document.getElementById("drawToggleButton");
+    if (drawBtn) drawBtn.classList.toggle("hidden-control", !canDraw);
+
+    if (!canDraw) {
+        if (drawingToolEnabled) setDrawToolEnabled(false);
+        closeDrawPanel();
+    }
 
     renderDrawingPermissions();
     renderDrawingPermissionRequest();
@@ -1464,7 +1635,7 @@ function resizeRemoteCanvas(tile) {
 }
 
 // ============================================================
-// LANDMARK -> CANVAS PIXEL
+// LANDMARK -> CANVAS PIXEL  (UNCHANGED)
 // ============================================================
 
 function getVideoCoverTransform() {
@@ -1563,7 +1734,8 @@ function createRemoteTile(participant) {
 
     const container = document.createElement("div");
     container.className = "remote-video-container";
-    container.style.position = "relative";
+    container.style.position = "absolute";
+    container.style.inset = "0";
     container.style.overflow = "hidden";
 
     const waiting = document.createElement("div");
@@ -1866,7 +2038,7 @@ function stopLocalMedia() {
 }
 
 // ============================================================
-// MEDIAPIPE
+// MEDIAPIPE  (UNCHANGED)
 // ============================================================
 
 function initMediaPipe() {
@@ -1976,9 +2148,19 @@ function onResults(results) {
     const values = [];
     for (const point of landmarks) values.push(point.x, point.y);
 
-    if (activeGesture === "draw") drawGesture(values);
-    else if (activeGesture === "erase") eraseGesture(values);
-    else resetDrawingState();
+    // ----- Drawing is only performed when the DRAW switch is ON. -----
+    // The gesture pipeline itself is untouched: the backend still
+    // predicts "draw" / "erase" / "clear" exactly as before.
+    if (!drawingToolEnabled) {
+        resetDrawingState();
+    } else if (activeGesture === "draw") {
+        if (eraserEnabled) eraseGesture(values);
+        else drawGesture(values);
+    } else if (activeGesture === "erase") {
+        eraseGesture(values);
+    } else {
+        resetDrawingState();
+    }
 
     const now = performance.now();
     if (now - lastPredictionTime >= PREDICTION_INTERVAL_MS) {
@@ -2040,6 +2222,8 @@ function updateGestureDisplay(gesture, confidence) {
     activeGesture = gesture || "no_gesture";
     activeConfidence = Number(confidence) || 0;
 
+    // The visible Gesture / Confidence panel was removed.
+    // These guards keep the (now-null) references safe.
     if (gestureDisplay) {
         gestureDisplay.textContent = activeGesture === "no_gesture"
             ? "NO GESTURE" : activeGesture.toUpperCase();
@@ -2091,7 +2275,14 @@ function drawGesture(values) {
         isDrawing = true;
         lastDrawX = x;
         lastDrawY = y;
-        drawDot(airCanvas, x / airCanvas.width, y / airCanvas.height, "draw");
+        drawDot(
+            airCanvas,
+            x / airCanvas.width,
+            y / airCanvas.height,
+            "draw",
+            drawingColor,
+            drawingThickness / 2 + 1
+        );
         return;
     }
 
@@ -2111,7 +2302,9 @@ function drawGesture(values) {
         lastDrawY / airCanvas.height,
         x / airCanvas.width,
         y / airCanvas.height,
-        "draw"
+        "draw",
+        drawingColor,
+        drawingThickness
     );
 
     sendDrawData(
@@ -2137,10 +2330,12 @@ function eraseGesture(values) {
     const px = clamp(pixel.x, 0, airCanvas.width);
     const py = clamp(pixel.y, 0, airCanvas.height);
 
+    const radius = clamp(Number(eraserSize) || 20, 4, 120);
+
     const ctx = airCanvas.getContext("2d");
     ctx.globalCompositeOperation = "destination-out";
     ctx.beginPath();
-    ctx.arc(px, py, 20, 0, Math.PI * 2);
+    ctx.arc(px, py, radius, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalCompositeOperation = "source-over";
 
@@ -2154,7 +2349,11 @@ function eraseGesture(values) {
     resetDrawingState();
 }
 
-function drawLine(canvas, x1, y1, x2, y2, action = "draw") {
+// NOTE: `color` and `width` are OPTIONAL. When omitted the original
+// hard-coded values (green / 3px draw / 20px erase) are used, so
+// existing drawing-history replay and old peers stay compatible.
+function drawLine(canvas, x1, y1, x2, y2, action = "draw",
+                  color = "#00ff00", width = null) {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -2164,12 +2363,16 @@ function drawLine(canvas, x1, y1, x2, y2, action = "draw") {
     const px2 = clamp(x2, 0, 1) * canvas.width;
     const py2 = clamp(y2, 0, 1) * canvas.height;
 
-    ctx.lineWidth = action === "erase" ? 20 : 3;
+    const lineWidth = Number.isFinite(Number(width)) && width !== null
+        ? Number(width)
+        : (action === "erase" ? 20 : 3);
+
+    ctx.lineWidth = lineWidth;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.globalCompositeOperation =
         action === "erase" ? "destination-out" : "source-over";
-    ctx.strokeStyle = "#00ff00";
+    ctx.strokeStyle = color || "#00ff00";
 
     ctx.beginPath();
     ctx.moveTo(px1, py1);
@@ -2179,20 +2382,26 @@ function drawLine(canvas, x1, y1, x2, y2, action = "draw") {
     ctx.globalCompositeOperation = "source-over";
 }
 
-function drawDot(canvas, x, y, action = "draw") {
+// NOTE: `color` and `radius` are OPTIONAL (same fallback strategy).
+function drawDot(canvas, x, y, action = "draw",
+                 color = "#00ff00", radius = null) {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    const r = Number.isFinite(Number(radius)) && radius !== null
+        ? Number(radius)
+        : (action === "erase" ? 20 : 2.5);
+
     ctx.globalCompositeOperation =
         action === "erase" ? "destination-out" : "source-over";
-    ctx.fillStyle = "#00ff00";
+    ctx.fillStyle = color || "#00ff00";
 
     ctx.beginPath();
     ctx.arc(
         clamp(x, 0, 1) * canvas.width,
         clamp(y, 0, 1) * canvas.height,
-        action === "erase" ? 20 : 2.5,
+        r,
         0,
         Math.PI * 2
     );
@@ -2229,6 +2438,10 @@ function sendDrawData(x, y, prevX, prevY, action) {
     const remoteX = 1 - localX;
     const remotePrevX = 1 - prevLocalX;
 
+    const isErase = action === "erase";
+
+    // Existing fields are unchanged. `color` / `lineWidth` are purely
+    // additive optional metadata for the UI controls.
     const message = {
         type: "draw_data",
         meeting_id: meetingId,
@@ -2241,7 +2454,11 @@ function sendDrawData(x, y, prevX, prevY, action) {
         prev_y: prevLocalY,
         lastX: remotePrevX,
         lastY: prevLocalY,
-        action: action || "draw"
+        action: action || "draw",
+        color: isErase ? null : drawingColor,
+        lineWidth: isErase
+            ? clamp(Number(eraserSize) || 20, 4, 120)
+            : drawingThickness
     };
 
     sendWS(message);
@@ -2329,14 +2546,23 @@ function handleRemoteDraw(data) {
     const y = Number(data.y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
 
+    // Optional metadata — absent on older messages, so we fall back
+    // to the original hard-coded values.
+    const remoteWidth = (data.lineWidth !== undefined &&
+                         data.lineWidth !== null &&
+                         Number.isFinite(Number(data.lineWidth)))
+        ? Number(data.lineWidth)
+        : null;
+
     if (data.action === "erase") {
+        const radius = remoteWidth !== null ? remoteWidth : 20;
         const ctx = tile.canvas.getContext("2d");
         ctx.globalCompositeOperation = "destination-out";
         ctx.beginPath();
         ctx.arc(
             clamp(x, 0, 1) * tile.canvas.width,
             clamp(y, 0, 1) * tile.canvas.height,
-            20, 0, Math.PI * 2
+            radius, 0, Math.PI * 2
         );
         ctx.fill();
         ctx.globalCompositeOperation = "source-over";
@@ -2346,10 +2572,16 @@ function handleRemoteDraw(data) {
     const prevX = Number(data.prev_x ?? data.lastX);
     const prevY = Number(data.prev_y ?? data.lastY);
 
+    const remoteColor = (typeof data.color === "string" && data.color)
+        ? data.color : "#00ff00";
+    const drawWidth = remoteWidth !== null ? remoteWidth : 3;
+
     if (Number.isFinite(prevX) && Number.isFinite(prevY)) {
-        drawLine(tile.canvas, prevX, prevY, x, y, "draw");
+        drawLine(tile.canvas, prevX, prevY, x, y, "draw",
+                 remoteColor, drawWidth);
     } else {
-        drawDot(tile.canvas, x, y, "draw");
+        drawDot(tile.canvas, x, y, "draw",
+                remoteColor, drawWidth / 2 + 1);
     }
 }
 
@@ -3249,6 +3481,10 @@ async function cleanupMeeting(stopCameraToo = true) {
     liveKitIdentityToUserId.clear();
     raisedHands.clear();
 
+    // Close the drawing panel and turn the tool OFF.
+    closeDrawPanel();
+    if (drawingToolEnabled) setDrawToolEnabled(false);
+
     activeGesture = "no_gesture";
     activeConfidence = 0;
     resetDrawingState();
@@ -3341,6 +3577,7 @@ function initializeApplication() {
     initializeMeetingPanels();
     ensureExtraControls();
     ensureNotificationsContainer();
+    initDrawingControls();
     updateLocalUI();
     setupCanvasSizes();
     observeVideoContainerSize();
