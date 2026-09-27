@@ -28,6 +28,7 @@ const MAX_GUEST_DRAWERS = 2;
 const PREDICTION_INTERVAL_MS = 80;
 const DRAW_SEND_INTERVAL_MS = 30;
 const CLEAR_COOLDOWN_MS = 700;
+const DRAWING_HISTORY_CHUNK_SIZE = 30;
 
 // ============================================================
 // DOM
@@ -142,6 +143,15 @@ let lastDrawY = 0;
 let smoothDrawX = null;
 let smoothDrawY = null;
 let lastDrawSendTime = 0;
+
+// Last position actually transmitted to remote peers.
+// Used so throttled frames never create visual gaps on other screens.
+let lastSentDrawX = null;
+let lastSentDrawY = null;
+
+// Every draw_data message this client has successfully emitted.
+// Replayed to participants who join later (FIX 2).
+let localDrawingHistory = [];
 
 // ============================================================
 // REMOTE PARTICIPANTS
@@ -837,6 +847,10 @@ function clearLocalCanvas() {
     isDrawing = false;
     lastDrawX = 0;
     lastDrawY = 0;
+    lastSentDrawX = null;
+    lastSentDrawY = null;
+    // FIX 2: wipe the recorded history too — the canvas is empty.
+    localDrawingHistory = [];
 }
 
 // ============================================================
@@ -1409,6 +1423,9 @@ function resetDrawingState() {
     lastDrawY = 0;
     smoothDrawX = null;
     smoothDrawY = null;
+    // Start a fresh "last sent" anchor for the next stroke.
+    lastSentDrawX = null;
+    lastSentDrawY = null;
 }
 
 // ============================================================
@@ -1577,9 +1594,6 @@ function sendDrawData(x, y, prevX, prevY, action) {
         return;
     }
 
-    const remoteX = 1 - clamp(Number(x), 0, 1);
-    const remotePrevX = 1 - clamp(Number(prevX), 0, 1);
-
     if (!meetingActive || !liveKitConnected) {
         return;
     }
@@ -1595,20 +1609,52 @@ function sendDrawData(x, y, prevX, prevY, action) {
 
     lastDrawSendTime = now;
 
-    sendWS({
+    const localX = clamp(Number(x), 0, 1);
+    const localY = Number(y);
+
+    let prevLocalX = clamp(Number(prevX), 0, 1);
+    let prevLocalY = Number(prevY);
+
+    // FIX 1: For "draw", always connect to the last position we ACTUALLY
+    // sent. If we used the caller's prevX (which advances every local
+    // frame even when this function early-returns), throttled frames
+    // would leave visible gaps on remote canvases.
+    if (
+        action !== "erase" &&
+        lastSentDrawX !== null &&
+        lastSentDrawY !== null
+    ) {
+        prevLocalX = lastSentDrawX;
+        prevLocalY = lastSentDrawY;
+    }
+
+    // Remember this position as the anchor for the next send.
+    lastSentDrawX = localX;
+    lastSentDrawY = localY;
+
+    const remoteX = 1 - localX;
+    const remotePrevX = 1 - prevLocalX;
+
+    const message = {
         type: "draw_data",
         meeting_id: meetingId,
         user_id: liveKitIdentity,
         user_name: userName,
         livekit_identity: liveKitIdentity,
         x: remoteX,
-        y: Number(y),
+        y: localY,
         prev_x: remotePrevX,
-        prev_y: Number(prevY),
+        prev_y: prevLocalY,
         lastX: remotePrevX,
-        lastY: Number(prevY),
+        lastY: prevLocalY,
         action: action || "draw"
-    });
+    };
+
+    sendWS(message);
+
+    // FIX 2: keep this event so late-joining participants can replay
+    // the same stroke.
+    localDrawingHistory.push(message);
 }
 
 function clearMyCanvasAndBroadcast() {
@@ -1629,6 +1675,49 @@ function clearMyCanvasAndBroadcast() {
         user_name: userName,
         livekit_identity: liveKitIdentity
     });
+}
+
+// ============================================================
+// LATE-JOIN DRAWING SYNC (FIX 2)
+// Sends this client's current drawing history to one specific
+// newly-joined participant so they see everything that was drawn
+// before they arrived.
+// ============================================================
+
+function sendDrawingHistoryTo(targetIdentity) {
+    const target = String(targetIdentity || "");
+    if (!target) return;
+    if (!localDrawingHistory.length) return;
+    if (!liveKitConnected || !liveKitRoom?.localParticipant) return;
+
+    for (
+        let i = 0;
+        i < localDrawingHistory.length;
+        i += DRAWING_HISTORY_CHUNK_SIZE
+    ) {
+        const chunk = localDrawingHistory.slice(
+            i,
+            i + DRAWING_HISTORY_CHUNK_SIZE
+        );
+
+        sendLiveKitData(
+            {
+                type: "drawing_history",
+                user_name: userName,
+                livekit_identity: liveKitIdentity,
+                events: chunk
+            },
+            {
+                reliable: true,
+                destinationIdentities: [target],
+                topic: "aircanvas-draw"
+            }
+        );
+    }
+
+    console.log(
+        `📤 Sent drawing history (${localDrawingHistory.length} events) → ${target}`
+    );
 }
 
 // ============================================================
@@ -2368,6 +2457,9 @@ async function connectLiveKit() {
             { reliable: true, topic: "aircanvas-control" }
         );
 
+        // FIX 2: push our existing drawing to the newly-joined peer.
+        sendDrawingHistoryTo(identity);
+
         for (const [id, info] of participantInfo) {
             if (info.livekitIdentity === identity) {
                 userIdToLiveKitIdentity.set(id, identity);
@@ -2782,7 +2874,7 @@ function initializeApplication() {
     initializeMeetingPanels();
     updateLocalUI();
     setupCanvasSizes();
-    observeVideoContainerSize();          // ← ADDED: keeps canvas in sync with grid reflow
+    observeVideoContainerSize();
     hideLegacyRemoteCard();
     updateParticipantCount();
     updateCanvasAvailability();
