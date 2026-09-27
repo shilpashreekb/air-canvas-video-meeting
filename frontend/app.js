@@ -17,8 +17,8 @@ const WS_URL =
 const LIVEKIT_SERVER_URL = "wss://air-canvas-3zfbpfwj.livekit.cloud";
 const LIVEKIT_TOKEN_SERVER_ID = "aircanvas-sixxay";
 
-const MAX_PARTICIPANTS = 100;      // <-- meeting capacity (unchanged)
-const MAX_GUEST_DRAWERS = 3;       // <-- exactly 3 guest drawing slots
+const MAX_PARTICIPANTS = 100;      // meeting capacity
+const MAX_GUEST_DRAWERS = 3;       // drawing-capable guests
 
 const PREDICTION_INTERVAL_MS = 80;
 const DRAW_SEND_INTERVAL_MS = 30;
@@ -49,8 +49,8 @@ const remoteCanvas = document.getElementById("remoteCanvas");
 const remoteAudio = document.getElementById("remoteAudio");
 const airCanvas = document.getElementById("airCanvas");
 const landmarkCanvas = document.getElementById("landmarkCanvas");
-// NOTE: the visible Gesture / Confidence panel was removed from the UI.
-// These lookups now return null; every use is null-guarded.
+// Gesture / Confidence UI was removed from the HTML; these now resolve to null
+// and every reference is null-guarded, so MediaPipe still runs unchanged.
 const gestureDisplay = document.getElementById("gesture");
 const confidenceDisplay = document.getElementById("confidence");
 const startCameraBtn = document.getElementById("startCamera");
@@ -137,14 +137,14 @@ let lastSentDrawY = null;
 let localDrawingHistory = [];
 
 // ----- Drawing tool UI state ---------------------------------
-// These ONLY control what the existing drawing engine draws.
-// They do NOT change landmark normalization, canvas mapping,
-// coordinate conversion, or the synchronisation format.
-let drawingToolEnabled = false;      // DRAW ON / OFF
-let drawingColor = "#00ff00";        // stroke colour
-let drawingThickness = 3;            // stroke width
-let eraserEnabled = false;           // eraser mode
-let eraserSize = 20;                 // eraser radius
+// These control ONLY how the existing drawing engine renders.
+// They do NOT touch landmark normalization, canvas mapping,
+// coordinate conversion, or the sync message format.
+let drawingToolEnabled = false;   // DRAW ON / OFF
+let drawingColor = "#00ff00";     // stroke colour
+let drawingThickness = 3;         // stroke width
+let eraserEnabled = false;        // eraser mode
+let eraserSize = 20;              // eraser radius
 
 const remoteParticipants = new Map();
 const userIdToLiveKitIdentity = new Map();
@@ -449,7 +449,7 @@ function ensureFeatureStyles() {
         /* Zoom-style centered meeting notifications */
         .meeting-notifications {
             position: fixed;
-            top: 16%;
+            top: 14%;
             left: 50%;
             transform: translateX(-50%);
             z-index: 9999;
@@ -461,15 +461,15 @@ function ensureFeatureStyles() {
             max-width: 92vw;
         }
         .meeting-notification {
-            background: #ffffff;
-            color: #1a1a1a;
-            border: 1px solid rgba(0, 0, 0, 0.08);
+            background: #1f2227;
+            color: #eef0f2;
+            border: 1px solid rgba(255, 255, 255, 0.10);
             border-radius: 12px;
-            padding: 14px 26px;
-            font-size: 15px;
+            padding: 12px 22px;
+            font-size: 14px;
             font-weight: 500;
             line-height: 1.4;
-            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+            box-shadow: 0 16px 44px rgba(0, 0, 0, 0.60);
             opacity: 0;
             transform: translateY(-10px);
             transition: opacity 0.28s ease, transform 0.28s ease;
@@ -538,9 +538,8 @@ function ensureFeatureStyles() {
         }
 
         /* Remote screen share overlay.
-           IMPORTANT: transform: none overrides the mirroring rule
-           on ".remote-video-container video" — screenshares must
-           NOT be horizontally flipped. */
+           transform: none overrides the mirroring rule so shared screens
+           are never horizontally flipped. */
         .remote-video-container .remote-screenshare-video {
             position: absolute;
             inset: 0;
@@ -559,10 +558,14 @@ function ensureFeatureStyles() {
             display: inline-block;
         }
 
+        /* Active-state colour for Hand / Share toolbar buttons */
+        .toolbar-btn.hand-raised,
+        .toolbar-btn.sharing,
         .control-button.hand-raised,
         .control-button.sharing {
-            background: #315fba !important;
+            background: rgba(79, 140, 255, 0.15) !important;
             border-color: #4f8cff !important;
+            color: #cfe0ff !important;
         }
 
         /* =====================================================
@@ -742,52 +745,64 @@ function toggleReactionsMenu(force) {
     if (shouldShow) positionReactionsMenu(menu);
 }
 
+// Wire up the pre-existing toolbar buttons (Hand / Reactions / Share).
+// Keeps the legacy "create if missing" behaviour for safety.
 function ensureExtraControls() {
-    const group = document.querySelector(
-        ".meeting-controls .control-group"
-    );
+    const group = document.querySelector(".toolbar-center");
     if (!group) return;
 
-    if (!document.getElementById("handRaiseButton")) {
-        const handBtn = document.createElement("button");
+    let handBtn = document.getElementById("handRaiseButton");
+    if (!handBtn) {
+        handBtn = document.createElement("button");
         handBtn.id = "handRaiseButton";
         handBtn.type = "button";
-        handBtn.className = "control-button meeting-action";
+        handBtn.className = "toolbar-btn";
         handBtn.title = "Raise or lower your hand";
         handBtn.innerHTML =
-            '<span class="control-icon">✋</span>' +
-            '<span class="control-text">Raise Hand</span>';
-        handBtn.addEventListener("click", toggleRaiseHand);
+            '<span class="toolbar-icon">✋</span>' +
+            '<span class="toolbar-label">Hand</span>';
         group.appendChild(handBtn);
     }
+    if (!handBtn.dataset.wired) {
+        handBtn.dataset.wired = "true";
+        handBtn.addEventListener("click", toggleRaiseHand);
+    }
 
-    if (!document.getElementById("reactionsButton")) {
-        const reactBtn = document.createElement("button");
+    let reactBtn = document.getElementById("reactionsButton");
+    if (!reactBtn) {
+        reactBtn = document.createElement("button");
         reactBtn.id = "reactionsButton";
         reactBtn.type = "button";
-        reactBtn.className = "control-button meeting-action";
+        reactBtn.className = "toolbar-btn";
         reactBtn.title = "Send a reaction";
         reactBtn.innerHTML =
-            '<span class="control-icon">😊</span>' +
-            '<span class="control-text">Reactions</span>';
+            '<span class="toolbar-icon">😊</span>' +
+            '<span class="toolbar-label">React</span>';
+        group.appendChild(reactBtn);
+    }
+    if (!reactBtn.dataset.wired) {
+        reactBtn.dataset.wired = "true";
         reactBtn.addEventListener("click", (ev) => {
             ev.stopPropagation();
             toggleReactionsMenu();
         });
-        group.appendChild(reactBtn);
     }
 
-    if (!document.getElementById("screenShareButton")) {
-        const shareBtn = document.createElement("button");
+    let shareBtn = document.getElementById("screenShareButton");
+    if (!shareBtn) {
+        shareBtn = document.createElement("button");
         shareBtn.id = "screenShareButton";
         shareBtn.type = "button";
-        shareBtn.className = "control-button meeting-action";
+        shareBtn.className = "toolbar-btn";
         shareBtn.title = "Share your screen";
         shareBtn.innerHTML =
-            '<span class="control-icon">🖥️</span>' +
-            '<span class="control-text">Share</span>';
-        shareBtn.addEventListener("click", toggleScreenShare);
+            '<span class="toolbar-icon">🖥️</span>' +
+            '<span class="toolbar-label">Share</span>';
         group.appendChild(shareBtn);
+    }
+    if (!shareBtn.dataset.wired) {
+        shareBtn.dataset.wired = "true";
+        shareBtn.addEventListener("click", toggleScreenShare);
     }
 
     if (!window.__airCanvasOutsideClickBound) {
@@ -803,7 +818,87 @@ function ensureExtraControls() {
 }
 
 // ============================================================
-// DRAWING TOOL CONTROLS  (UI ONLY — does not touch drawing math)
+// MORE MENU
+// ============================================================
+
+function positionMoreMenu() {
+    const menu = document.getElementById("moreMenu");
+    const btn = document.getElementById("moreButton");
+    if (!menu || !btn) return;
+    const rect = btn.getBoundingClientRect();
+    const menuWidth = menu.offsetWidth || 240;
+    const left = Math.min(
+        Math.max(8, rect.left + rect.width / 2 - menuWidth / 2),
+        window.innerWidth - menuWidth - 8
+    );
+    menu.style.left = `${left}px`;
+    menu.style.bottom = `${window.innerHeight - rect.top + 8}px`;
+}
+
+function toggleMoreMenu(force) {
+    const menu = document.getElementById("moreMenu");
+    if (!menu) return;
+    const shouldShow = typeof force === "boolean"
+        ? force : menu.classList.contains("hidden");
+    menu.classList.toggle("hidden", !shouldShow);
+    if (shouldShow) positionMoreMenu();
+}
+
+function handleMoreMenuAction(action) {
+    switch (action) {
+        case "clear-canvas":
+            clearCanvasButtonAction();
+            break;
+        case "copy-id":
+            copyMeetingIdToClipboard();
+            break;
+        case "captions":
+            showMeetingNotification("💬 Captions coming soon");
+            break;
+        case "settings":
+            showMeetingNotification("⚙️ Settings coming soon");
+            break;
+        default:
+            break;
+    }
+}
+
+function initMoreMenu() {
+    const btn = document.getElementById("moreButton");
+    const menu = document.getElementById("moreMenu");
+    if (!btn || !menu) return;
+    if (btn.dataset.wired) {
+        positionMoreMenu();
+        return;
+    }
+    btn.dataset.wired = "true";
+
+    btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        toggleMoreMenu();
+    });
+
+    menu.addEventListener("click", (ev) => {
+        const item = ev.target.closest(".more-menu-item");
+        if (!item) return;
+        handleMoreMenuAction(item.dataset.action);
+        toggleMoreMenu(false);
+    });
+
+    if (!window.__airCanvasMoreOutsideClickBound) {
+        window.__airCanvasMoreOutsideClickBound = true;
+        document.addEventListener("click", (ev) => {
+            const m = document.getElementById("moreMenu");
+            if (!m || m.classList.contains("hidden")) return;
+            if (m.contains(ev.target)) return;
+            if (ev.target.closest && ev.target.closest("#moreButton")) return;
+            toggleMoreMenu(false);
+        });
+    }
+}
+
+// ============================================================
+// DRAWING TOOL CONTROLS  (UI only — never touches drawing maths)
 // ============================================================
 
 function applyDrawingControlUI() {
@@ -813,7 +908,7 @@ function applyDrawingControlUI() {
         onOffBtn.setAttribute(
             "aria-pressed", drawingToolEnabled ? "true" : "false"
         );
-        const t = onOffBtn.querySelector(".draw-switch-text");
+        const t = onOffBtn.querySelector(".switch-text");
         if (t) t.textContent = drawingToolEnabled ? "ON" : "OFF";
     }
 
@@ -823,7 +918,7 @@ function applyDrawingControlUI() {
         eraserBtn.setAttribute(
             "aria-pressed", eraserEnabled ? "true" : "false"
         );
-        const t = eraserBtn.querySelector(".draw-switch-text");
+        const t = eraserBtn.querySelector(".switch-text");
         if (t) t.textContent = eraserEnabled ? "ON" : "OFF";
     }
 
@@ -879,6 +974,26 @@ function toggleDrawPanel(force) {
     const shouldShow = typeof force === "boolean"
         ? force : panel.classList.contains("hidden");
     panel.classList.toggle("hidden", !shouldShow);
+    if (shouldShow) {
+        const fab = document.getElementById("drawToggleButton");
+        const p = document.getElementById("drawPanel");
+        if (fab && p) {
+            const rect = fab.getBoundingClientRect();
+            const panelW = p.offsetWidth || 288;
+            const left = Math.min(
+                Math.max(8, rect.right - panelW),
+                window.innerWidth - panelW - 8
+            );
+            p.style.left = "auto";
+            p.style.right = "16px";
+            if (window.innerWidth < 640) {
+                p.style.left = "10px";
+                p.style.right = "10px";
+            } else if (left !== rect.right - panelW) {
+                // keep default right-anchored placement on desktop
+            }
+        }
+    }
 }
 
 function closeDrawPanel() {
@@ -934,6 +1049,11 @@ function initDrawingControls() {
             option.addEventListener("click", () => {
                 setDrawingThickness(Number(option.dataset.size) || 3);
             });
+        });
+
+    document.getElementById("drawPanelClear")
+        ?.addEventListener("click", () => {
+            clearCanvasButtonAction();
         });
 
     if (!window.__airCanvasDrawOutsideClickBound) {
@@ -1145,9 +1265,9 @@ function updateHandRaiseButton() {
     if (!btn) return;
     const raised = raisedHands.has(liveKitIdentity);
     btn.classList.toggle("hand-raised", raised);
-    const textEl = btn.querySelector(".control-text");
-    if (textEl) textEl.textContent = raised ? "Lower Hand" : "Raise Hand";
-    const iconEl = btn.querySelector(".control-icon");
+    const textEl = btn.querySelector(".toolbar-label");
+    if (textEl) textEl.textContent = raised ? "Lower" : "Hand";
+    const iconEl = btn.querySelector(".toolbar-icon");
     if (iconEl) iconEl.textContent = raised ? "🖐️" : "✋";
 }
 
@@ -1242,7 +1362,7 @@ function updateScreenShareUI() {
     const btn = document.getElementById("screenShareButton");
     if (!btn) return;
     btn.classList.toggle("sharing", isScreenSharing);
-    const textEl = btn.querySelector(".control-text");
+    const textEl = btn.querySelector(".toolbar-label");
     if (textEl) textEl.textContent = isScreenSharing ? "Stop" : "Share";
 }
 
@@ -1362,12 +1482,12 @@ function updateCanvasAvailability() {
             : "You have nothing to clear.";
     }
 
-    // Gesture / Confidence panel was removed from the UI.
-    // These guards keep the (now-null) references safe.
+    // Gesture / Confidence UI is gone — these guards keep the
+    // (now-null) references safe.
     if (gestureDisplay && !canDraw) gestureDisplay.textContent = "VIEW ONLY";
     if (confidenceDisplay && !canDraw) confidenceDisplay.textContent = "--";
 
-    // Show the DRAW button only when the user may draw.
+    // Show the Air Canvas button only when the user may draw.
     const drawBtn = document.getElementById("drawToggleButton");
     if (drawBtn) drawBtn.classList.toggle("hidden-control", !canDraw);
 
@@ -1537,7 +1657,8 @@ function renderDrawingPermissions() {
 function updateLocalUI() {
     if (localParticipantLabel) {
         const raised = raisedHands.has(liveKitIdentity);
-        localParticipantLabel.textContent = (userName || "You") + (raised ? " ✋" : "");
+        localParticipantLabel.textContent =
+            (userName || "You") + (raised ? " ✋" : "");
     }
 }
 
@@ -1569,7 +1690,7 @@ if (currentTypedName) {
 }
 
 // ============================================================
-// CANVAS HELPERS
+// CANVAS HELPERS  (UNCHANGED)
 // ============================================================
 
 function resizeCanvasPreserve(canvas, cssWidth, cssHeight) {
@@ -1695,7 +1816,7 @@ function clearLocalCanvas() {
 }
 
 // ============================================================
-// REMOTE PARTICIPANT TILES
+// REMOTE PARTICIPANT TILES  (UNCHANGED)
 // ============================================================
 
 function hideLegacyRemoteCard() {
@@ -1734,9 +1855,6 @@ function createRemoteTile(participant) {
 
     const container = document.createElement("div");
     container.className = "remote-video-container";
-    container.style.position = "absolute";
-    container.style.inset = "0";
-    container.style.overflow = "hidden";
 
     const waiting = document.createElement("div");
     waiting.className = "waiting-participant";
@@ -1755,7 +1873,6 @@ function createRemoteTile(participant) {
     remoteVid.style.visibility = "visible";
     remoteVid.style.opacity = "1";
 
-    // Screen share video (hidden by default, INLINE style wins).
     const screenVid = document.createElement("video");
     screenVid.autoplay = true;
     screenVid.playsInline = true;
@@ -1798,7 +1915,6 @@ function createRemoteTile(participant) {
 
     remoteParticipants.set(identity, tile);
 
-    // Card overlay controls (Pin / Fit / Restore).
     addCardControls(card, identity);
 
     requestAnimationFrame(() => {
@@ -1848,7 +1964,6 @@ function removeRemoteTile(identity) {
     pendingRemoteDrawingHistory.delete(key);
     updateParticipantCount();
 
-    // If the removed tile was pinned, unpin.
     if (pinnedIdentity === key) {
         unpinParticipant();
     }
@@ -1891,7 +2006,6 @@ function attachRemoteAudio(participant, track) {
     }
 }
 
-// ----- Screen share attach / detach --------------------------
 function attachRemoteScreenShare(participant, track) {
     const tile = createRemoteTile(participant);
     if (!tile || !track) return;
@@ -1946,7 +2060,7 @@ function detachRemoteTrack(participant, track) {
 }
 
 // ============================================================
-// CAMERA
+// CAMERA  (UNCHANGED)
 // ============================================================
 
 async function startLocalMedia() {
@@ -2148,9 +2262,8 @@ function onResults(results) {
     const values = [];
     for (const point of landmarks) values.push(point.x, point.y);
 
-    // ----- Drawing is only performed when the DRAW switch is ON. -----
-    // The gesture pipeline itself is untouched: the backend still
-    // predicts "draw" / "erase" / "clear" exactly as before.
+    // Drawing happens only when the DRAW switch is ON.
+    // The gesture pipeline itself is untouched.
     if (!drawingToolEnabled) {
         resetDrawingState();
     } else if (activeGesture === "draw") {
@@ -2222,8 +2335,7 @@ function updateGestureDisplay(gesture, confidence) {
     activeGesture = gesture || "no_gesture";
     activeConfidence = Number(confidence) || 0;
 
-    // The visible Gesture / Confidence panel was removed.
-    // These guards keep the (now-null) references safe.
+    // Gesture/Confidence UI removed — keep the (now-null) refs safe.
     if (gestureDisplay) {
         gestureDisplay.textContent = activeGesture === "no_gesture"
             ? "NO GESTURE" : activeGesture.toUpperCase();
@@ -2245,7 +2357,7 @@ function resetDrawingState() {
 }
 
 // ============================================================
-// LOCAL DRAWING
+// LOCAL DRAWING  (coordinates unchanged, colours/sizes now driven by UI)
 // ============================================================
 
 function drawGesture(values) {
@@ -2349,9 +2461,8 @@ function eraseGesture(values) {
     resetDrawingState();
 }
 
-// NOTE: `color` and `width` are OPTIONAL. When omitted the original
-// hard-coded values (green / 3px draw / 20px erase) are used, so
-// existing drawing-history replay and old peers stay compatible.
+// `color` and `width` are OPTIONAL — omitting them keeps the original
+// green / 3px draw / 20px erase behaviour for old peers & replays.
 function drawLine(canvas, x1, y1, x2, y2, action = "draw",
                   color = "#00ff00", width = null) {
     if (!canvas) return;
@@ -2363,7 +2474,7 @@ function drawLine(canvas, x1, y1, x2, y2, action = "draw",
     const px2 = clamp(x2, 0, 1) * canvas.width;
     const py2 = clamp(y2, 0, 1) * canvas.height;
 
-    const lineWidth = Number.isFinite(Number(width)) && width !== null
+    const lineWidth = (width !== null && Number.isFinite(Number(width)))
         ? Number(width)
         : (action === "erase" ? 20 : 3);
 
@@ -2382,14 +2493,13 @@ function drawLine(canvas, x1, y1, x2, y2, action = "draw",
     ctx.globalCompositeOperation = "source-over";
 }
 
-// NOTE: `color` and `radius` are OPTIONAL (same fallback strategy).
 function drawDot(canvas, x, y, action = "draw",
                  color = "#00ff00", radius = null) {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const r = Number.isFinite(Number(radius)) && radius !== null
+    const r = (radius !== null && Number.isFinite(Number(radius)))
         ? Number(radius)
         : (action === "erase" ? 20 : 2.5);
 
@@ -2440,8 +2550,7 @@ function sendDrawData(x, y, prevX, prevY, action) {
 
     const isErase = action === "erase";
 
-    // Existing fields are unchanged. `color` / `lineWidth` are purely
-    // additive optional metadata for the UI controls.
+    // Existing fields unchanged — color/lineWidth are additive.
     const message = {
         type: "draw_data",
         meeting_id: meetingId,
@@ -2515,7 +2624,7 @@ function sendDrawingHistoryTo(targetIdentity) {
 }
 
 // ============================================================
-// REMOTE DRAWING
+// REMOTE DRAWING  (X-flip unchanged; colour/width are optional)
 // ============================================================
 
 function resolveRemoteIdentity(data) {
@@ -2546,8 +2655,6 @@ function handleRemoteDraw(data) {
     const y = Number(data.y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
 
-    // Optional metadata — absent on older messages, so we fall back
-    // to the original hard-coded values.
     const remoteWidth = (data.lineWidth !== undefined &&
                          data.lineWidth !== null &&
                          Number.isFinite(Number(data.lineWidth)))
@@ -2594,7 +2701,7 @@ function handleRemoteClear(data) {
 }
 
 // ============================================================
-// LIVEKIT DATA
+// LIVEKIT DATA  (UNCHANGED)
 // ============================================================
 
 async function sendLiveKitData(message, options = {}) {
@@ -2700,7 +2807,7 @@ function handleLiveKitData(payload, participant) {
 }
 
 // ============================================================
-// WEBSOCKET COMPATIBILITY
+// WEBSOCKET COMPATIBILITY  (UNCHANGED)
 // ============================================================
 
 function sendWS(message) {
@@ -3064,7 +3171,7 @@ function disconnectWebSocket() {
 }
 
 // ============================================================
-// LIVEKIT SDK LOADING
+// LIVEKIT SDK LOADING  (UNCHANGED)
 // ============================================================
 
 function loadLiveKitSDK() {
@@ -3099,7 +3206,7 @@ function loadLiveKitSDK() {
 }
 
 // ============================================================
-// LIVEKIT
+// LIVEKIT  (UNCHANGED)
 // ============================================================
 
 async function connectLiveKit() {
@@ -3316,7 +3423,6 @@ function setupMeetingUI() {
     updateCanvasAvailability();
     renderDrawingPermissions();
 
-    // Ensure local card has pin/fit controls whenever entering a meeting.
     setupLocalCardControls();
 }
 
@@ -3398,8 +3504,11 @@ async function toggleMute() {
         catch (error) { console.warn("⚠️ LiveKit microphone toggle:", error); }
     }
     if (muteButton) {
-        muteButton.textContent = isMuted ? "🔇 Muted" : "🎤 Mic";
         muteButton.classList.toggle("muted", isMuted);
+        const label = muteButton.querySelector(".toolbar-label");
+        if (label) label.textContent = isMuted ? "Unmute" : "Audio";
+        const icon = muteButton.querySelector(".toolbar-icon");
+        if (icon) icon.textContent = isMuted ? "🔇" : "🎤";
     }
 }
 
@@ -3413,8 +3522,11 @@ async function toggleCamera() {
         catch (error) { console.warn("⚠️ LiveKit camera toggle:", error); }
     }
     if (cameraButton) {
-        cameraButton.textContent = isCameraOff ? "🚫 Camera Off" : "📹 Camera";
         cameraButton.classList.toggle("camera-off", isCameraOff);
+        const label = cameraButton.querySelector(".toolbar-label");
+        if (label) label.textContent = isCameraOff ? "Start Video" : "Video";
+        const icon = cameraButton.querySelector(".toolbar-icon");
+        if (icon) icon.textContent = isCameraOff ? "🚫" : "📹";
     }
 }
 
@@ -3422,9 +3534,10 @@ async function copyMeetingIdToClipboard() {
     if (!meetingId) return;
     try {
         await navigator.clipboard.writeText(meetingId);
+        showMeetingNotification("📋 Meeting ID copied");
         if (copyMeetingId) {
             const old = copyMeetingId.textContent;
-            copyMeetingId.textContent = "✅ Copied!";
+            copyMeetingId.textContent = "✅";
             setTimeout(() => (copyMeetingId.textContent = old), 1200);
         }
     } catch (error) {
@@ -3450,10 +3563,8 @@ async function cleanupMeeting(stopCameraToo = true) {
     isScreenSharing = false;
     updateScreenShareUI();
 
-    // Exit fullscreen if we were in it
     try { exitFullscreen(); } catch (_) {}
 
-    // Reset pinned state
     pinnedIdentity = null;
     try { applyPinState(); } catch (_) {}
 
@@ -3481,8 +3592,9 @@ async function cleanupMeeting(stopCameraToo = true) {
     liveKitIdentityToUserId.clear();
     raisedHands.clear();
 
-    // Close the drawing panel and turn the tool OFF.
+    // Close the popovers and turn the drawing tool OFF.
     closeDrawPanel();
+    toggleMoreMenu(false);
     if (drawingToolEnabled) setDrawToolEnabled(false);
 
     activeGesture = "no_gesture";
@@ -3500,12 +3612,18 @@ async function cleanupMeeting(stopCameraToo = true) {
     if (meetingIdDisplay) meetingIdDisplay.textContent = "Meeting ID: ------";
 
     if (muteButton) {
-        muteButton.textContent = "🎤 Mic";
         muteButton.classList.remove("muted");
+        const label = muteButton.querySelector(".toolbar-label");
+        if (label) label.textContent = "Audio";
+        const icon = muteButton.querySelector(".toolbar-icon");
+        if (icon) icon.textContent = "🎤";
     }
     if (cameraButton) {
-        cameraButton.textContent = "📹 Camera";
         cameraButton.classList.remove("camera-off");
+        const label = cameraButton.querySelector(".toolbar-label");
+        if (label) label.textContent = "Video";
+        const icon = cameraButton.querySelector(".toolbar-icon");
+        if (icon) icon.textContent = "📹";
     }
     if (leaveMeetingBtn) leaveMeetingBtn.disabled = true;
 }
@@ -3529,7 +3647,7 @@ async function leaveMeeting() {
         homeStartCamera.disabled = false;
     }
     if (startCameraBtn) {
-        startCameraBtn.textContent = "Start Camera";
+        startCameraBtn.textContent = "Start";
         startCameraBtn.disabled = false;
     }
     if (cameraStatus) {
@@ -3546,7 +3664,6 @@ homeStartCamera?.addEventListener("click", startCameraFromHome);
 createMeetingButton?.addEventListener("click", createMeeting);
 joinMeetingButton?.addEventListener("click", joinMeeting);
 startCameraBtn?.addEventListener("click", startCameraFromMeeting);
-clearCanvasBtn?.addEventListener("click", clearCanvasButtonAction);
 muteButton?.addEventListener("click", toggleMute);
 cameraButton?.addEventListener("click", toggleCamera);
 leaveMeetingBtn?.addEventListener("click", leaveMeeting);
@@ -3556,7 +3673,13 @@ meetingIdInput?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") joinMeeting();
 });
 
-window.addEventListener("resize", setupCanvasSizes);
+window.addEventListener("resize", () => {
+    setupCanvasSizes();
+    const moreMenu = document.getElementById("moreMenu");
+    if (moreMenu && !moreMenu.classList.contains("hidden")) {
+        positionMoreMenu();
+    }
+});
 
 document.addEventListener("fullscreenchange", handleFullscreenChange);
 document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
@@ -3576,8 +3699,9 @@ function initializeApplication() {
     ensureFeatureStyles();
     initializeMeetingPanels();
     ensureExtraControls();
-    ensureNotificationsContainer();
+    initMoreMenu();
     initDrawingControls();
+    ensureNotificationsContainer();
     updateLocalUI();
     setupCanvasSizes();
     observeVideoContainerSize();
@@ -3588,7 +3712,6 @@ function initializeApplication() {
     updateScreenShareUI();
     setConnectionStatus("Disconnected");
 
-    // Wire up local card pin/fit controls.
     setupLocalCardControls();
 
     if (meetingScreen) meetingScreen.classList.add("hidden");
