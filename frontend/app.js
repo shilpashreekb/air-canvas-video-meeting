@@ -494,105 +494,17 @@ function updateCanvasAvailability() {
     renderDrawingPermissionRequest();
 }
 
+// ------------------------------------------------------------
+// FIX 2: Participant-side "Request Drawing" UI has been removed.
+// Participants can no longer request drawing permission themselves.
+// The host alone grants / revokes drawing permission directly.
+// ------------------------------------------------------------
 function renderDrawingPermissionRequest() {
     if (!meetingMain) return;
 
-    let panel = document.getElementById("drawingPermissionRequestPanel");
-
-    if (isMeetingCreator || canvasEnabled) {
-        if (panel) panel.remove();
-        return;
-    }
-
-    if (!panel) {
-        panel = document.createElement("div");
-        panel.id = "drawingPermissionRequestPanel";
-        panel.style.margin = "12px 0";
-        panel.style.padding = "12px 14px";
-        panel.style.borderRadius = "8px";
-        panel.style.background = "#181a1d";
-        panel.style.border = "1px solid #34383e";
-        meetingMain.appendChild(panel);
-    }
-
-    panel.innerHTML = "";
-
-    const text = document.createElement("div");
-
-    if (drawingPermissionRequested) {
-        text.textContent =
-            "⏳ Your drawing permission request is waiting for the host.";
-    } else if (drawingPermissionStatus) {
-        text.textContent = drawingPermissionStatus;
-    } else {
-        text.textContent =
-            "You are view-only. Ask the host for permission to draw.";
-    }
-
-    text.style.marginBottom = "9px";
-
-    const button = document.createElement("button");
-    button.type = "button";
-
-    if (drawingPermissionRequested) {
-        button.textContent = "⏳ Request Pending";
-        button.disabled = true;
-        button.style.cursor = "default";
-    } else if (drawingPermissionStatus) {
-        button.textContent = "Try Again";
-        button.disabled = false;
-        button.style.cursor = "pointer";
-        button.onclick = () => {
-            drawingPermissionStatus = "";
-            drawingPermissionRequested = true;
-
-            const sent = sendWS({
-                type: "request_drawing",
-                user_id: String(userId || liveKitIdentity),
-                user_name: userName || "Participant",
-                livekit_identity: liveKitIdentity
-            });
-
-            if (!sent) {
-                drawingPermissionRequested = false;
-                drawingPermissionStatus =
-                    "Could not contact the host. Please try again.";
-            }
-
-            renderDrawingPermissionRequest();
-        };
-    } else {
-        button.textContent = "🎨 Ask Permission to Draw";
-        button.disabled = false;
-        button.style.cursor = "pointer";
-        button.onclick = () => {
-            const sent = sendWS({
-                type: "request_drawing",
-                user_id: String(userId || liveKitIdentity),
-                user_name: userName || "Participant",
-                livekit_identity: liveKitIdentity
-            });
-
-            if (!sent) {
-                drawingPermissionStatus =
-                    "Could not contact the host. Please try again.";
-                renderDrawingPermissionRequest();
-                return;
-            }
-
-            drawingPermissionRequested = true;
-            drawingPermissionStatus = "";
-            renderDrawingPermissionRequest();
-        };
-    }
-
-    button.style.padding = "7px 11px";
-    button.style.border = "1px solid #41464d";
-    button.style.borderRadius = "6px";
-    button.style.background = "#2c3035";
-    button.style.color = "#f2f3f4";
-
-    panel.append(text, button);
+    // Remove any leftover request panel from previous versions.
+    const panel = document.getElementById("drawingPermissionRequestPanel");
+    if (panel) panel.remove();
 }
 
 function renderDrawingPermissions() {
@@ -677,26 +589,43 @@ function renderDrawingPermissions() {
         button.style.border = "0";
         button.style.borderRadius = "7px";
 
+        const targetIdentity = String(
+            info.livekitIdentity ||
+                userIdToLiveKitIdentity.get(String(id)) ||
+                id
+        );
+
         if (info.canvasEnabled) {
+            // --------------------------------------------------------
+            // FIX 3: Remove Drawing.
+            //  1) Send revoke_drawing to the target participant.
+            //  2) Immediately update host-side local state so the
+            //     button flips back to "Give Drawing".
+            // --------------------------------------------------------
             button.textContent = "Remove Drawing";
-            button.onclick = () =>
+            button.onclick = () => {
                 sendWS({
                     type: "revoke_drawing",
-                    target_user_id: id
+                    target_user_id: targetIdentity,
+                    target_livekit_identity: targetIdentity,
+                    target_user_name: info.name || "Participant"
                 });
+
+                info.canvasEnabled = false;
+                drawingPermissionRequests.delete(String(id));
+                participantInfo.set(String(id), info);
+                renderDrawingPermissions();
+            };
         } else if (drawingPermissionRequests.has(id)) {
+            // (Request-based approve path is no longer reachable because
+            // participants no longer send request_drawing messages. Kept
+            // for backwards compatibility only.)
             button.textContent = "Approve Drawing";
             button.disabled = activeGuestDrawers >= MAX_GUEST_DRAWERS;
             button.title = button.disabled
                 ? `Only ${MAX_GUEST_DRAWERS} guest participants can draw at once.`
                 : "Approve this participant's drawing request";
             button.onclick = () => {
-                const targetIdentity = String(
-                    info.livekitIdentity ||
-                        userIdToLiveKitIdentity.get(String(id)) ||
-                        id
-                );
-
                 sendWS({
                     type: "grant_drawing",
                     target_user_id: targetIdentity,
@@ -717,12 +646,6 @@ function renderDrawingPermissions() {
                 : "Give this participant drawing permission";
 
             button.onclick = () => {
-                const targetIdentity = String(
-                    info.livekitIdentity ||
-                        userIdToLiveKitIdentity.get(String(id)) ||
-                        id
-                );
-
                 sendWS({
                     type: "grant_drawing",
                     target_user_id: targetIdentity,
@@ -957,7 +880,10 @@ function createRemoteTile(participant) {
     remoteVid.style.width = "100%";
     remoteVid.style.height = "100%";
     remoteVid.style.objectFit = "cover";
-    remoteVid.style.transform = "none";
+    // FIX 1: remote video must show the SAME orientation as the
+    // speaker's own selfie preview → mirror it, exactly like the
+    // local preview.
+    remoteVid.style.transform = "scaleX(-1)";
     remoteVid.style.display = "block";
     remoteVid.style.visibility = "visible";
     remoteVid.style.opacity = "1";
@@ -970,6 +896,9 @@ function createRemoteTile(participant) {
     canvas.style.height = "100%";
     canvas.style.pointerEvents = "none";
     canvas.style.zIndex = "5";
+    // The drawing canvas stays UNMIRRORED — the draw-sync pipeline
+    // already sends 1-x, so strokes remain aligned with the (now
+    // mirrored) remote video.
     canvas.style.transform = "none";
 
     const audio = document.createElement("audio");
@@ -1060,7 +989,9 @@ function attachRemoteVideo(participant, track) {
     try {
         track.attach(tile.video);
 
-        tile.video.style.transform = "none";
+        // FIX 1: keep remote video mirrored so it matches the
+        // speaker's own selfie preview.
+        tile.video.style.transform = "scaleX(-1)";
         tile.video.style.display = "block";
         tile.video.style.visibility = "visible";
         tile.video.style.opacity = "1";
@@ -2038,43 +1969,17 @@ function handleWebSocketMessage(data) {
 
         case "request_drawing":
         case "drawing_permission_request": {
-            const requesterId = data.user_id || data.livekit_identity || data.sender_identity
-                ? String(data.user_id || data.livekit_identity || data.sender_identity)
-                : null;
-
-            if (isMeetingCreator && requesterId) {
-                drawingPermissionRequests.add(requesterId);
-                const existing = participantInfo.get(requesterId) || {
-                    userId: requesterId,
-                    name: data.user_name || "Participant",
-                    isCreator: false,
-                    livekitIdentity: data.livekit_identity || null,
-                    canvasEnabled: false
-                };
-                existing.name = data.user_name || existing.name;
-                existing.livekitIdentity = data.livekit_identity || existing.livekitIdentity;
-                participantInfo.set(requesterId, existing);
-                renderDrawingPermissions();
-                console.log(`🙋 Drawing permission requested by ${existing.name}`);
-            }
+            // Participants no longer request permission, but if an older
+            // client ever sends one, we safely ignore it.
             break;
         }
 
         case "drawing_permission_denied": {
-            drawingPermissionRequested = false;
-
-            drawingPermissionStatus = String(
-                data.message ||
-                    "Drawing permission is currently unavailable."
-            );
-
-            renderDrawingPermissionRequest();
-
+            // No request UI exists anymore; just log.
             console.log(
                 "🚫 Drawing permission unavailable:",
-                drawingPermissionStatus
+                data.message || ""
             );
-
             break;
         }
 
@@ -2126,8 +2031,6 @@ function handleWebSocketMessage(data) {
                 id === String(userId) ||
                 id === String(liveKitIdentity)
             ) {
-                drawingPermissionRequested = false;
-                drawingPermissionStatus = "";
                 canvasEnabled = permissionEnabled;
 
                 if (canvasEnabled) {
@@ -2148,6 +2051,69 @@ function handleWebSocketMessage(data) {
                 `🎨 Drawing permission for ${existing.name}: ${
                     existing.canvasEnabled ? "ENABLED" : "DISABLED"
                 }`
+            );
+
+            break;
+        }
+
+        // ------------------------------------------------------------
+        // FIX 3: revoke_drawing handler.
+        // This is the counterpart of grant_drawing. Previously this
+        // case did not exist at all, so "Remove Drawing" silently
+        // did nothing on the target participant.
+        // ------------------------------------------------------------
+        case "revoke_drawing": {
+            const id =
+                data.target_livekit_identity
+                    ? String(data.target_livekit_identity)
+                    : data.target_user_id
+                    ? String(data.target_user_id)
+                    : data.user_id
+                    ? String(data.user_id)
+                    : null;
+
+            if (!id) break;
+
+            const existing = participantInfo.get(id) || {
+                userId: id,
+                name: data.user_name || "Participant",
+                isCreator: false
+            };
+
+            existing.canvasEnabled = false;
+
+            if (data.livekit_identity) {
+                existing.livekitIdentity = String(data.livekit_identity);
+                userIdToLiveKitIdentity.set(
+                    id,
+                    String(data.livekit_identity)
+                );
+                liveKitIdentityToUserId.set(
+                    String(data.livekit_identity),
+                    id
+                );
+            }
+
+            participantInfo.set(id, existing);
+
+            if (isMeetingCreator) {
+                drawingPermissionRequests.delete(id);
+            }
+
+            if (
+                id === String(userId) ||
+                id === String(liveKitIdentity)
+            ) {
+                canvasEnabled = false;
+                stopMediaPipeOnly();
+                resetDrawingState();
+                updateCanvasAvailability();
+            } else {
+                renderDrawingPermissions();
+            }
+
+            console.log(
+                `🎨 Drawing permission for ${existing.name}: DISABLED (revoked)`
             );
 
             break;

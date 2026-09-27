@@ -317,17 +317,23 @@ button {
     object-fit: cover;
 }
 
+/* Local preview = selfie/mirror view */
 .video-container video {
     transform: scaleX(-1);
 }
 
+/* Remote video MUST match the person's own selfie preview orientation.
+   (Was transform: none — that is what caused the horizontal flip
+   relative to the speaker's own preview.) */
 .remote-video-container video {
-    transform: none !important;
+    transform: scaleX(-1) !important;
     display: block;
     visibility: visible;
     opacity: 1;
 }
 
+/* Local drawing / landmark canvases are mirrored together with the
+   local video. Do NOT touch. */
 .video-container canvas {
     position: absolute;
     top: 0;
@@ -348,6 +354,8 @@ button {
     background: transparent;
 }
 
+/* Remote drawing canvas must remain UNMIRRORED — draw-sync already
+   flips X (remoteX = 1 - x). Do NOT touch. */
 #remoteCanvas,
 .remote-drawing-canvas {
     position: absolute;
@@ -737,24 +745,21 @@ button {
     font-size: 0.66rem;
 }
 
-/* Existing permission cards are kept functional, but made less "AI dashboard"-like. */
-#drawingPermissionsPanel,
-#drawingPermissionRequestPanel {
+/* Host drawing permissions panel styling */
+#drawingPermissionsPanel {
     background: #1b1d20 !important;
     border: 1px solid #34383e !important;
     border-radius: 7px !important;
     color: #e8eaec;
 }
 
-#drawingPermissionsPanel button,
-#drawingPermissionRequestPanel button {
+#drawingPermissionsPanel button {
     background: #2c3035;
     color: #f2f3f4;
     border: 1px solid #41464d;
 }
 
-#drawingPermissionsPanel button:hover,
-#drawingPermissionRequestPanel button:hover {
+#drawingPermissionsPanel button:hover {
     background: #373c42;
 }
 
