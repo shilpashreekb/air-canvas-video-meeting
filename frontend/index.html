@@ -119,26 +119,24 @@
 
                 <div class="participants-grid">
 
-                    <div class="participant-card">
+                    <!-- LOCAL PARTICIPANT (always first in DOM so pagination starts from here) -->
+                    <div class="participant-card" data-identity="local">
                         <div id="localParticipantLabel" class="participant-label">You</div>
                         <div class="video-container">
                             <video id="video" autoplay playsinline muted></video>
                             <canvas id="airCanvas"></canvas>
                             <canvas id="landmarkCanvas"></canvas>
+
+                            <!-- Local camera-off overlay -->
+                            <div id="cameraOffOverlay" class="camera-off-overlay hidden" aria-hidden="true">
+                                <div class="camera-off-avatar">👤</div>
+                                <span class="camera-off-text">Camera is off</span>
+                            </div>
                         </div>
                     </div>
 
-                    <div class="participant-card">
-                        <div id="remoteParticipantLabel" class="participant-label">Participant</div>
-                        <div class="remote-video-container">
-                            <div id="waitingParticipant" class="waiting-participant">
-                                <div class="participant-avatar">👤</div>
-                                <span>Waiting for participant...</span>
-                            </div>
-                            <video id="remoteVideo" autoplay playsinline></video>
-                            <canvas id="remoteCanvas"></canvas>
-                        </div>
-                    </div>
+                    <!-- No placeholder card here — remote participant cards
+                         are appended dynamically ONLY when someone actually joins. -->
 
                 </div>
 
@@ -161,6 +159,7 @@
                     aria-haspopup="dialog"
                 >
                     <span class="draw-fab-icon">🎨</span>
+                    <span class="draw-fab-text">Ask permission to draw</span>
                 </button>
 
 
