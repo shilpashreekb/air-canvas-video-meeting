@@ -1,13 +1,8 @@
 // ============================================================
 // AIR CANVAS - VIDEO MEETING
-// COMPLETE CLEAN APP.JS
 // ============================================================
 
 "use strict";
-
-// ============================================================
-// CONFIG
-// ============================================================
 
 const BACKEND_URL =
     (location.hostname === "localhost" || location.hostname === "127.0.0.1")
@@ -31,11 +26,7 @@ const CLEAR_COOLDOWN_MS = 700;
 const DRAWING_HISTORY_CHUNK_SIZE = 30;
 
 const REACTION_OPTIONS = ["👍", "👏", "❤️", "😂", "😮", "🎉"];
-const NOTIFICATION_LIFETIME_MS = 3500;
-
-// ============================================================
-// DOM
-// ============================================================
+const NOTIFICATION_LIFETIME_MS = 3000;
 
 const homeScreen = document.getElementById("homeScreen");
 const meetingScreen = document.getElementById("meetingScreen");
@@ -86,10 +77,6 @@ const participantCount = document.getElementById("participantCount");
 
 let chatUnreadCount = 0;
 
-// ============================================================
-// STATE
-// ============================================================
-
 let localStream = null;
 let ws = null;
 let liveKitDataReady = false;
@@ -118,26 +105,14 @@ let liveKitIdentity =
     "aircanvas-" + Math.random().toString(36).substring(2, 10);
 
 // ----- New feature state -------------------------------------
-
-// Identities (LiveKit) whose hands are currently raised.
 const raisedHands = new Set();
-
-// Screen sharing state.
 let isScreenSharing = false;
 let screenShareStream = null;
 let screenShareTrack = null;
 
-// ============================================================
-// MEDIAPIPE STATE
-// ============================================================
-
 let hands = null;
 let camera = null;
 let mediaPipeStarted = false;
-
-// ============================================================
-// GESTURE STATE
-// ============================================================
 
 let activeGesture = "no_gesture";
 let activeConfidence = 0;
@@ -146,29 +121,15 @@ let pendingLandmarks = null;
 let lastPredictionTime = 0;
 let lastClearTime = 0;
 
-// ============================================================
-// DRAWING STATE
-// ============================================================
-
 let isDrawing = false;
 let lastDrawX = 0;
 let lastDrawY = 0;
 let smoothDrawX = null;
 let smoothDrawY = null;
 let lastDrawSendTime = 0;
-
-// Last position actually transmitted to remote peers.
-// Used so throttled frames never create visual gaps on other screens.
 let lastSentDrawX = null;
 let lastSentDrawY = null;
-
-// Every draw_data message this client has successfully emitted.
-// Replayed to participants who join later (late-join sync).
 let localDrawingHistory = [];
-
-// ============================================================
-// REMOTE PARTICIPANTS
-// ============================================================
 
 const remoteParticipants = new Map();
 const userIdToLiveKitIdentity = new Map();
@@ -176,17 +137,9 @@ const liveKitIdentityToUserId = new Map();
 const participantInfo = new Map();
 const pendingRemoteDrawingHistory = new Map();
 
-// ============================================================
-// BASIC HELPERS
-// ============================================================
-
 function generateUserId() {
-    return (
-        "user-" +
-        Date.now().toString(36) +
-        "-" +
-        Math.random().toString(36).substring(2, 8)
-    );
+    return "user-" + Date.now().toString(36) + "-" +
+        Math.random().toString(36).substring(2, 8);
 }
 
 function generateMeetingId() {
@@ -207,48 +160,31 @@ function clamp(value, min, max) {
 }
 
 function setConnectionStatus(text) {
-    if (connectionStatus) {
-        connectionStatus.textContent = `Backend: ${text}`;
-    }
+    if (connectionStatus) connectionStatus.textContent = `Backend: ${text}`;
 }
 
 function updateParticipantCount() {
     const count = 1 + remoteParticipants.size;
-
-    if (participantCount) {
-        participantCount.textContent = String(count);
-    }
-
+    if (participantCount) participantCount.textContent = String(count);
     const panelCount = document.getElementById("participantsPanelCount");
-
     if (panelCount) {
         panelCount.textContent =
             `${count} participant${count === 1 ? "" : "s"}`;
     }
-
     renderParticipantsList();
 }
 
 function getInitials(name) {
     const value = String(name || "Participant").trim();
     if (!value) return "P";
-
-    return (
-        value
-            .split(/\s+/)
-            .slice(0, 2)
-            .map((part) => part.charAt(0).toUpperCase())
-            .join("") || "P"
-    );
+    return value.split(/\s+/).slice(0, 2)
+        .map((part) => part.charAt(0).toUpperCase()).join("") || "P";
 }
 
 function formatChatTime(value) {
     const date = value ? new Date(value) : new Date();
     if (Number.isNaN(date.getTime())) return "";
-    return date.toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit"
-    });
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function setChatUnreadCount(count) {
@@ -299,8 +235,7 @@ function appendChatMessage(data) {
     if (!text) return;
 
     const message = document.createElement("div");
-    message.className =
-        "chat-message" +
+    message.className = "chat-message" +
         (senderId && senderId === String(userId) ? " mine" : "");
 
     const meta = document.createElement("div");
@@ -308,8 +243,8 @@ function appendChatMessage(data) {
 
     const name = document.createElement("span");
     name.className = "chat-message-name";
-    name.textContent =
-        senderId && senderId === String(userId) ? "You" : senderName;
+    name.textContent = senderId && senderId === String(userId)
+        ? "You" : senderName;
 
     const time = document.createElement("span");
     time.className = "chat-message-time";
@@ -324,10 +259,13 @@ function appendChatMessage(data) {
     chatMessages.appendChild(message);
     chatMessages.scrollTop = chatMessages.scrollHeight;
 
-    const chatIsOpen =
-        chatPanel && !chatPanel.classList.contains("hidden");
+    const chatIsOpen = chatPanel && !chatPanel.classList.contains("hidden");
     if (!chatIsOpen && senderId !== String(userId)) {
         setChatUnreadCount(chatUnreadCount + 1);
+        // New: temporary toast for incoming messages.
+        if (senderId) {
+            showMeetingNotification(`💬 ${senderName} sent a message`);
+        }
     }
 }
 
@@ -350,10 +288,8 @@ async function sendChatMessage() {
     };
 
     const sent = await sendLiveKitData(message, {
-        reliable: true,
-        topic: "aircanvas-control"
+        reliable: true, topic: "aircanvas-control"
     });
-
     if (!sent) return;
 
     appendChatMessage(message);
@@ -368,7 +304,6 @@ function renderParticipantsList() {
     if (!participantsList) return;
 
     const entries = [];
-
     entries.push([
         String(userId || "local"),
         {
@@ -387,25 +322,17 @@ function renderParticipantsList() {
 
     remoteParticipants.forEach((tile) => {
         const identity = String(tile.identity);
-
         const existingIndex = entries.findIndex(
-            ([, info]) =>
-                String(info.livekitIdentity || "") === identity
+            ([, info]) => String(info.livekitIdentity || "") === identity
         );
-
         if (existingIndex >= 0) {
             const existingInfo = entries[existingIndex][1];
             existingInfo.livekitIdentity = identity;
-            if (
-                !existingInfo.name ||
-                existingInfo.name === "Participant"
-            ) {
-                existingInfo.name =
-                    tile.participant?.name || "Participant";
+            if (!existingInfo.name || existingInfo.name === "Participant") {
+                existingInfo.name = tile.participant?.name || "Participant";
             }
             return;
         }
-
         entries.push([
             identity,
             {
@@ -431,7 +358,6 @@ function renderParticipantsList() {
         const infoBox = document.createElement("div");
         infoBox.className = "participant-list-info";
 
-        // Determine raised-hand state for this entry
         let isHandRaised;
         if (info.isLocal) {
             isHandRaised = raisedHands.has(String(liveKitIdentity));
@@ -443,16 +369,13 @@ function renderParticipantsList() {
 
         const name = document.createElement("div");
         name.className = "participant-list-name";
-        const nameText = document.createTextNode(
-            info.isLocal
-                ? `${info.name || "You"} (You)`
-                : info.name || "Participant"
-        );
-        name.appendChild(nameText);
+        name.textContent = info.isLocal
+            ? `${info.name || "You"} (You)`
+            : info.name || "Participant";
         if (isHandRaised) {
             const hand = document.createElement("span");
             hand.className = "participant-list-hand";
-            hand.textContent = "✋";
+            hand.textContent = " ✋";
             name.appendChild(hand);
         }
 
@@ -464,45 +387,30 @@ function renderParticipantsList() {
 
         const drawStatus = document.createElement("div");
         drawStatus.className = "participant-draw-status";
-        drawStatus.textContent = info.canvasEnabled
-            ? "🎨 Drawing"
-            : "View only";
+        drawStatus.textContent = info.canvasEnabled ? "🎨 Drawing" : "View only";
 
         row.append(avatar, infoBox, drawStatus);
         participantsList.appendChild(row);
     });
 
     const count = entries.length;
-
     if (participantCount) {
         participantCount.textContent = String(
             Math.max(count, 1 + remoteParticipants.size)
         );
     }
-
     if (participantsPanelCount) {
-        const displayCount = Math.max(
-            count,
-            1 + remoteParticipants.size
-        );
+        const displayCount = Math.max(count, 1 + remoteParticipants.size);
         participantsPanelCount.textContent =
             `${displayCount} participant${displayCount === 1 ? "" : "s"}`;
     }
 }
 
 function initializeMeetingPanels() {
-    if (chatButton) {
-        chatButton.addEventListener("click", openChatPanel);
-    }
-    if (closeChatButton) {
-        closeChatButton.addEventListener("click", closeChatPanel);
-    }
-    if (participantsButton) {
-        participantsButton.addEventListener("click", openParticipantsPanel);
-    }
-    if (closeParticipantsButton) {
-        closeParticipantsButton.addEventListener("click", closeParticipantsPanel);
-    }
+    if (chatButton) chatButton.addEventListener("click", openChatPanel);
+    if (closeChatButton) closeChatButton.addEventListener("click", closeChatPanel);
+    if (participantsButton) participantsButton.addEventListener("click", openParticipantsPanel);
+    if (closeParticipantsButton) closeParticipantsButton.addEventListener("click", closeParticipantsPanel);
 
     if (chatForm) {
         chatForm.addEventListener("submit", (event) => {
@@ -515,9 +423,7 @@ function initializeMeetingPanels() {
 }
 
 // ============================================================
-// FEATURE ADDITIONS: UI HELPERS (notifications, reactions, extra
-// controls). These inject themselves at runtime so no HTML/CSS
-// changes are needed.
+// FEATURE STYLES / NOTIFICATIONS / REACTIONS / EXTRA CONTROLS
 // ============================================================
 
 function ensureFeatureStyles() {
@@ -526,41 +432,48 @@ function ensureFeatureStyles() {
     const style = document.createElement("style");
     style.id = "airCanvasFeatureStyles";
     style.textContent = `
+        /* Zoom-style centered meeting notifications */
         .meeting-notifications {
             position: fixed;
-            top: 70px;
-            right: 16px;
+            top: 16%;
+            left: 50%;
+            transform: translateX(-50%);
             z-index: 9999;
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            align-items: center;
+            gap: 10px;
             pointer-events: none;
-            max-width: 320px;
+            max-width: 92vw;
         }
         .meeting-notification {
-            background: rgba(28, 30, 34, 0.94);
-            color: #f5f5f5;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 8px;
-            padding: 10px 14px;
-            font-size: 13px;
-            line-height: 1.35;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+            background: #ffffff;
+            color: #1a1a1a;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            border-radius: 12px;
+            padding: 14px 26px;
+            font-size: 15px;
+            font-weight: 500;
+            line-height: 1.4;
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
             opacity: 0;
-            transform: translateX(12px);
-            transition: opacity 0.25s ease, transform 0.25s ease;
+            transform: translateY(-10px);
+            transition: opacity 0.28s ease, transform 0.28s ease;
             pointer-events: auto;
-            max-width: 320px;
+            max-width: 440px;
             word-break: break-word;
+            text-align: center;
         }
         .meeting-notification.visible {
             opacity: 1;
-            transform: translateX(0);
+            transform: translateY(0);
         }
         .meeting-notification.leaving {
             opacity: 0;
-            transform: translateX(12px);
+            transform: translateY(-10px);
         }
+
+        /* Reactions menu */
         .reactions-menu {
             position: fixed;
             z-index: 9998;
@@ -572,9 +485,7 @@ function ensureFeatureStyles() {
             gap: 4px;
             box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
         }
-        .reactions-menu.hidden {
-            display: none !important;
-        }
+        .reactions-menu.hidden { display: none !important; }
         .reaction-option {
             width: 40px;
             height: 40px;
@@ -589,6 +500,8 @@ function ensureFeatureStyles() {
             background: #2c3035;
             transform: scale(1.08);
         }
+
+        /* Reaction bubble on a video tile */
         .reaction-bubble {
             position: absolute;
             bottom: 12px;
@@ -609,21 +522,26 @@ function ensureFeatureStyles() {
             opacity: 0;
             transform: translateY(-20px) scale(1.15);
         }
-        .remote-screenshare-video {
+
+        /* Remote screen share overlay.
+           Use a two-class selector so it beats .remote-video-container video. */
+        .remote-video-container .remote-screenshare-video {
             position: absolute;
             inset: 0;
             width: 100%;
             height: 100%;
             object-fit: contain;
             background: #000;
-            z-index: 3;
+            z-index: 4;
             display: none;
         }
+
         .participant-list-hand {
             margin-left: 6px;
             font-size: 0.85rem;
             display: inline-block;
         }
+
         .control-button.hand-raised,
         .control-button.sharing {
             background: #315fba !important;
@@ -652,24 +570,20 @@ function showMeetingNotification(text, opts = {}) {
     toast.textContent = String(text);
 
     if (opts.tone === "warning") {
-        toast.style.borderColor = "rgba(240, 180, 90, 0.5)";
+        toast.style.borderColor = "rgba(240, 180, 90, 0.6)";
     }
 
     container.appendChild(toast);
     requestAnimationFrame(() => toast.classList.add("visible"));
 
-    const lifetime =
-        typeof opts.duration === "number"
-            ? opts.duration
-            : NOTIFICATION_LIFETIME_MS;
+    const lifetime = typeof opts.duration === "number"
+        ? opts.duration : NOTIFICATION_LIFETIME_MS;
 
     setTimeout(() => {
         toast.classList.remove("visible");
         toast.classList.add("leaving");
         setTimeout(() => {
-            try {
-                toast.remove();
-            } catch (_) {}
+            try { toast.remove(); } catch (_) {}
         }, 320);
     }, lifetime);
 }
@@ -703,7 +617,7 @@ function positionReactionsMenu(menu) {
     const btn = document.getElementById("reactionsButton");
     if (!btn || !menu) return;
     const rect = btn.getBoundingClientRect();
-    const menuWidth = 6 * 44 + 12; // approx; keeps left edge reasonable
+    const menuWidth = 6 * 44 + 12;
     const left = Math.min(
         Math.max(8, rect.left + rect.width / 2 - menuWidth / 2),
         window.innerWidth - menuWidth - 8
@@ -715,11 +629,8 @@ function positionReactionsMenu(menu) {
 
 function toggleReactionsMenu(force) {
     const menu = ensureReactionsMenu();
-    const shouldShow =
-        typeof force === "boolean"
-            ? force
-            : menu.classList.contains("hidden");
-
+    const shouldShow = typeof force === "boolean"
+        ? force : menu.classList.contains("hidden");
     menu.classList.toggle("hidden", !shouldShow);
     if (shouldShow) positionReactionsMenu(menu);
 }
@@ -730,7 +641,6 @@ function ensureExtraControls() {
     );
     if (!group) return;
 
-    // --- Hand raise ------------------------------------------
     if (!document.getElementById("handRaiseButton")) {
         const handBtn = document.createElement("button");
         handBtn.id = "handRaiseButton";
@@ -738,12 +648,12 @@ function ensureExtraControls() {
         handBtn.className = "control-button meeting-action";
         handBtn.title = "Raise or lower your hand";
         handBtn.innerHTML =
-            '<span class="control-icon">✋</span><span class="control-text">Raise Hand</span>';
+            '<span class="control-icon">✋</span>' +
+            '<span class="control-text">Raise Hand</span>';
         handBtn.addEventListener("click", toggleRaiseHand);
         group.appendChild(handBtn);
     }
 
-    // --- Reactions -------------------------------------------
     if (!document.getElementById("reactionsButton")) {
         const reactBtn = document.createElement("button");
         reactBtn.id = "reactionsButton";
@@ -751,7 +661,8 @@ function ensureExtraControls() {
         reactBtn.className = "control-button meeting-action";
         reactBtn.title = "Send a reaction";
         reactBtn.innerHTML =
-            '<span class="control-icon">😊</span><span class="control-text">Reactions</span>';
+            '<span class="control-icon">😊</span>' +
+            '<span class="control-text">Reactions</span>';
         reactBtn.addEventListener("click", (ev) => {
             ev.stopPropagation();
             toggleReactionsMenu();
@@ -759,7 +670,6 @@ function ensureExtraControls() {
         group.appendChild(reactBtn);
     }
 
-    // --- Screen share ----------------------------------------
     if (!document.getElementById("screenShareButton")) {
         const shareBtn = document.createElement("button");
         shareBtn.id = "screenShareButton";
@@ -767,39 +677,34 @@ function ensureExtraControls() {
         shareBtn.className = "control-button meeting-action";
         shareBtn.title = "Share your screen";
         shareBtn.innerHTML =
-            '<span class="control-icon">🖥️</span><span class="control-text">Share</span>';
+            '<span class="control-icon">🖥️</span>' +
+            '<span class="control-text">Share</span>';
         shareBtn.addEventListener("click", toggleScreenShare);
         group.appendChild(shareBtn);
     }
 
-    // Close reactions menu on outside click
     if (!window.__airCanvasOutsideClickBound) {
         window.__airCanvasOutsideClickBound = true;
         document.addEventListener("click", (ev) => {
             const menu = document.getElementById("reactionsMenu");
             if (!menu || menu.classList.contains("hidden")) return;
             if (menu.contains(ev.target)) return;
-            if (ev.target.closest && ev.target.closest("#reactionsButton")) {
-                return;
-            }
+            if (ev.target.closest && ev.target.closest("#reactionsButton")) return;
             toggleReactionsMenu(false);
         });
     }
 }
 
 // ============================================================
-// FEATURE: HAND RAISE
+// HAND RAISE
 // ============================================================
 
 function toggleRaiseHand() {
     const currentlyRaised = raisedHands.has(liveKitIdentity);
     const nextRaised = !currentlyRaised;
 
-    if (nextRaised) {
-        raisedHands.add(liveKitIdentity);
-    } else {
-        raisedHands.delete(liveKitIdentity);
-    }
+    if (nextRaised) raisedHands.add(liveKitIdentity);
+    else raisedHands.delete(liveKitIdentity);
 
     updateHandRaiseButton();
     updateLocalUI();
@@ -833,15 +738,13 @@ function broadcastRaiseHand(raised) {
 }
 
 // ============================================================
-// FEATURE: REACTIONS
+// REACTIONS
 // ============================================================
 
 function findTileContainer(identity) {
     const key = String(identity || "");
     if (!key) return null;
-    if (key === String(liveKitIdentity)) {
-        return video?.parentElement || null;
-    }
+    if (key === String(liveKitIdentity)) return video?.parentElement || null;
     const tile = remoteParticipants.get(key);
     return tile?.container || null;
 }
@@ -861,9 +764,7 @@ function showReactionBubble(identity, emoji) {
         bubble.classList.remove("visible");
         bubble.classList.add("leaving");
         setTimeout(() => {
-            try {
-                bubble.remove();
-            } catch (_) {}
+            try { bubble.remove(); } catch (_) {}
         }, 400);
     }, 2200);
 }
@@ -872,9 +773,8 @@ function sendReaction(emoji) {
     if (!emoji) return;
     if (!liveKitConnected) return;
 
-    // Local echo: show our own reaction in our own tile and a toast.
     showReactionBubble(liveKitIdentity, emoji);
-    showMeetingNotification(`${emoji} You reacted`);
+    showMeetingNotification(`${emoji} You reacted ${emoji}`);
 
     sendWS({
         type: "reaction",
@@ -885,22 +785,36 @@ function sendReaction(emoji) {
 }
 
 // ============================================================
-// FEATURE: SCREEN SHARING
+// SCREEN SHARING
 // ============================================================
 
-function isScreenShareTrack(track) {
+function isScreenShareTrack(track, publication) {
     if (!track) return false;
+
+    // Prefer publication.source when available (most reliable).
+    try {
+        const pubSource = publication?.source;
+        if (pubSource) {
+            const s = String(pubSource).toLowerCase();
+            return s === "screen_share" || s === "screenshare";
+        }
+    } catch (_) {}
+
+    // Fall back to track.source.
     try {
         const LK = window.LivekitClient;
-        if (
-            LK?.Track?.Source?.ScreenShare &&
-            track.source === LK.Track.Source.ScreenShare
-        ) {
+        if (LK?.Track?.Source?.ScreenShare &&
+            track.source === LK.Track.Source.ScreenShare) {
             return true;
         }
     } catch (_) {}
-    const s = String(track.source || "").toLowerCase();
-    return s === "screen_share" || s === "screenshare";
+
+    try {
+        const s = String(track.source || "").toLowerCase();
+        return s === "screen_share" || s === "screenshare";
+    } catch (_) {
+        return false;
+    }
 }
 
 function updateScreenShareUI() {
@@ -919,12 +833,10 @@ function cleanupScreenShareLocal() {
 
 async function startScreenShare() {
     if (isScreenSharing) return;
-
     if (!liveKitConnected || !liveKitRoom?.localParticipant) {
         alert("Not connected to the meeting yet.");
         return;
     }
-
     if (!navigator.mediaDevices?.getDisplayMedia) {
         alert("Screen sharing is not supported in this browser.");
         return;
@@ -938,9 +850,7 @@ async function startScreenShare() {
 
         const track = stream.getVideoTracks()[0];
         if (!track) {
-            try {
-                stream.getTracks().forEach((t) => t.stop());
-            } catch (_) {}
+            try { stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
             return;
         }
 
@@ -948,8 +858,7 @@ async function startScreenShare() {
         screenShareTrack = track;
 
         const LK = window.LivekitClient;
-        const sourceValue =
-            (LK?.Track?.Source?.ScreenShare) || "screen_share";
+        const sourceValue = (LK?.Track?.Source?.ScreenShare) || "screen_share";
 
         await liveKitRoom.localParticipant.publishTrack(track, {
             name: "air-canvas-screen-share",
@@ -958,15 +867,10 @@ async function startScreenShare() {
 
         isScreenSharing = true;
         updateScreenShareUI();
-
         showMeetingNotification("🖥️ You started screen sharing");
-
         broadcastScreenShare(true);
 
-        // When the user stops sharing from the browser's own UI:
-        track.addEventListener("ended", () => {
-            stopScreenShare();
-        });
+        track.addEventListener("ended", () => { stopScreenShare(); });
     } catch (error) {
         console.warn("Screen share cancelled or failed:", error);
         cleanupScreenShareLocal();
@@ -981,8 +885,7 @@ async function stopScreenShare() {
         if (screenShareTrack && liveKitRoom?.localParticipant) {
             try {
                 await liveKitRoom.localParticipant.unpublishTrack(
-                    screenShareTrack,
-                    true
+                    screenShareTrack, true
                 );
             } catch (error) {
                 console.warn("unpublishTrack error:", error);
@@ -990,18 +893,12 @@ async function stopScreenShare() {
         }
     } catch (_) {}
 
-    try {
-        if (screenShareTrack) screenShareTrack.stop();
-    } catch (_) {}
+    try { if (screenShareTrack) screenShareTrack.stop(); } catch (_) {}
     try {
         if (screenShareStream) {
-            screenShareStream
-                .getTracks()
-                .forEach((t) => {
-                    try {
-                        t.stop();
-                    } catch (_) {}
-                });
+            screenShareStream.getTracks().forEach((t) => {
+                try { t.stop(); } catch (_) {}
+            });
         }
     } catch (_) {}
 
@@ -1015,11 +912,8 @@ async function stopScreenShare() {
 }
 
 async function toggleScreenShare() {
-    if (isScreenSharing) {
-        await stopScreenShare();
-    } else {
-        await startScreenShare();
-    }
+    if (isScreenSharing) await stopScreenShare();
+    else await startScreenShare();
 }
 
 function broadcastScreenShare(active) {
@@ -1032,8 +926,7 @@ function broadcastScreenShare(active) {
 }
 
 // ============================================================
-// CANVAS AVAILABILITY (unchanged logic, still supports clear
-// even after drawing permission is revoked)
+// CANVAS AVAILABILITY
 // ============================================================
 
 function updateCanvasAvailability() {
@@ -1048,25 +941,15 @@ function updateCanvasAvailability() {
             : "You have nothing to clear.";
     }
 
-    if (gestureDisplay && !canDraw) {
-        gestureDisplay.textContent = "VIEW ONLY";
-    }
-    if (confidenceDisplay && !canDraw) {
-        confidenceDisplay.textContent = "--";
-    }
+    if (gestureDisplay && !canDraw) gestureDisplay.textContent = "VIEW ONLY";
+    if (confidenceDisplay && !canDraw) confidenceDisplay.textContent = "--";
 
     renderDrawingPermissions();
     renderDrawingPermissionRequest();
 }
 
-// ------------------------------------------------------------
-// Participant-side "Request Drawing" UI has been removed.
-// Participants can no longer request drawing permission themselves.
-// The host alone grants / revokes drawing permission directly.
-// ------------------------------------------------------------
 function renderDrawingPermissionRequest() {
     if (!meetingMain) return;
-
     const panel = document.getElementById("drawingPermissionRequestPanel");
     if (panel) panel.remove();
 }
@@ -1169,7 +1052,6 @@ function renderDrawingPermissions() {
                     target_livekit_identity: targetIdentity,
                     target_user_name: info.name || "Participant"
                 });
-
                 info.canvasEnabled = false;
                 drawingPermissionRequests.delete(String(id));
                 participantInfo.set(String(id), info);
@@ -1188,7 +1070,6 @@ function renderDrawingPermissions() {
                     target_livekit_identity: targetIdentity,
                     target_user_name: info.name || "Participant"
                 });
-
                 info.canvasEnabled = true;
                 drawingPermissionRequests.delete(String(id));
                 participantInfo.set(String(id), info);
@@ -1200,7 +1081,6 @@ function renderDrawingPermissions() {
             button.title = button.disabled
                 ? `Only ${MAX_GUEST_DRAWERS} guest participants can draw at once.`
                 : "Give this participant drawing permission";
-
             button.onclick = () => {
                 sendWS({
                     type: "grant_drawing",
@@ -1208,7 +1088,6 @@ function renderDrawingPermissions() {
                     target_livekit_identity: targetIdentity,
                     target_user_name: info.name || "Participant"
                 });
-
                 info.canvasEnabled = true;
                 drawingPermissionRequests.delete(String(id));
                 participantInfo.set(String(id), info);
@@ -1226,8 +1105,7 @@ function renderDrawingPermissions() {
 function updateLocalUI() {
     if (localParticipantLabel) {
         const raised = raisedHands.has(liveKitIdentity);
-        localParticipantLabel.textContent =
-            (userName || "You") + (raised ? " ✋" : "");
+        localParticipantLabel.textContent = (userName || "You") + (raised ? " ✋" : "");
     }
 }
 
@@ -1245,10 +1123,7 @@ function showMeeting() {
 // USER ID / NAME
 // ============================================================
 
-userId =
-    localStorage.getItem("airCanvasUserId") ||
-    generateUserId();
-
+userId = localStorage.getItem("airCanvasUserId") || generateUserId();
 localStorage.setItem("airCanvasUserId", userId);
 
 const savedName = localStorage.getItem("airCanvasUserName");
@@ -1258,10 +1133,7 @@ if (currentTypedName) {
     userName = currentTypedName.slice(0, 30);
 } else if (savedName) {
     userName = String(savedName).trim().slice(0, 30) || "Participant";
-
-    if (userNameInput) {
-        userNameInput.value = userName;
-    }
+    if (userNameInput) userNameInput.value = userName;
 }
 
 // ============================================================
@@ -1273,15 +1145,12 @@ function resizeCanvasPreserve(canvas, cssWidth, cssHeight) {
 
     const width = Math.max(1, Math.round(cssWidth));
     const height = Math.max(1, Math.round(cssHeight));
-
     if (canvas.width === width && canvas.height === height) return;
 
     let oldImage = null;
-
     try {
         if (canvas.width > 0 && canvas.height > 0) {
-            oldImage = canvas
-                .getContext("2d")
+            oldImage = canvas.getContext("2d")
                 ?.getImageData(0, 0, canvas.width, canvas.height);
         }
     } catch (_) {}
@@ -1304,19 +1173,13 @@ function resizeCanvasPreserve(canvas, cssWidth, cssHeight) {
 function setupCanvasSizes() {
     if (video && airCanvas && landmarkCanvas) {
         const rect = video.parentElement?.getBoundingClientRect();
-
         if (rect && rect.width > 0 && rect.height > 0) {
             resizeCanvasPreserve(airCanvas, rect.width, rect.height);
             resizeCanvasPreserve(landmarkCanvas, rect.width, rect.height);
         }
     }
-
     remoteParticipants.forEach((tile) => resizeRemoteCanvas(tile));
 }
-
-// ============================================================
-// VIDEO CONTAINER RESIZE OBSERVER
-// ============================================================
 
 let videoContainerResizeObserver = null;
 
@@ -1330,19 +1193,17 @@ function observeVideoContainerSize() {
     videoContainerResizeObserver = new ResizeObserver(() => {
         setupCanvasSizes();
     });
-
     videoContainerResizeObserver.observe(container);
 }
 
 function resizeRemoteCanvas(tile) {
     if (!tile?.canvas || !tile.container) return;
-
     const rect = tile.container.getBoundingClientRect();
     resizeCanvasPreserve(tile.canvas, rect.width, rect.height);
 }
 
 // ============================================================
-// LANDMARK -> CANVAS PIXEL (object-fit: cover transform)
+// LANDMARK -> CANVAS PIXEL
 // ============================================================
 
 function getVideoCoverTransform() {
@@ -1353,7 +1214,6 @@ function getVideoCoverTransform() {
     const ch = container.clientHeight;
     const vw = video.videoWidth;
     const vh = video.videoHeight;
-
     if (!cw || !ch || !vw || !vh) return null;
 
     const scale = Math.max(cw / vw, ch / vh);
@@ -1370,7 +1230,6 @@ function getVideoCoverTransform() {
 function landmarkToCanvasPixel(nx, ny) {
     const vw = video?.videoWidth || 0;
     const vh = video?.videoHeight || 0;
-
     const t = getVideoCoverTransform();
 
     if (!t || !vw || !vh) {
@@ -1388,9 +1247,7 @@ function landmarkToCanvasPixel(nx, ny) {
 function clearCanvasElement(canvas) {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
-    if (ctx) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-    }
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
 function clearLocalCanvas() {
@@ -1419,10 +1276,7 @@ function createRemoteTile(participant) {
     if (!participant) return null;
 
     const identity = String(participant.identity);
-
-    if (!identity || identity === liveKitIdentity) {
-        return null;
-    }
+    if (!identity || identity === liveKitIdentity) return null;
 
     if (remoteParticipants.has(identity)) {
         const existing = remoteParticipants.get(identity);
@@ -1468,12 +1322,16 @@ function createRemoteTile(participant) {
     remoteVid.style.visibility = "visible";
     remoteVid.style.opacity = "1";
 
-    // New: screen-share video (hidden until a screen share track arrives).
+    // ----- Screen share <video> (hidden by default) -----
+    // IMPORTANT: use INLINE style so it always wins over the
+    // existing ".remote-video-container video { display: block }"
+    // CSS rule regardless of selector specificity.
     const screenVid = document.createElement("video");
     screenVid.autoplay = true;
     screenVid.playsInline = true;
     screenVid.setAttribute("playsinline", "");
     screenVid.className = "remote-screenshare-video";
+    screenVid.style.display = "none";
 
     const canvas = document.createElement("canvas");
     canvas.className = "remote-drawing-canvas";
@@ -1488,6 +1346,7 @@ function createRemoteTile(participant) {
     const audio = document.createElement("audio");
     audio.autoplay = true;
 
+    // Order matters: waiting, camera video, screen video (overlay), canvas, audio
     container.append(waiting, remoteVid, screenVid, canvas, audio);
     card.append(label, container);
     participantsGrid.appendChild(card);
@@ -1513,7 +1372,6 @@ function createRemoteTile(participant) {
         resizeRemoteCanvas(tile);
         flushPendingRemoteDrawingHistory(identity);
     });
-
     requestAnimationFrame(() => resizeRemoteCanvas(tile));
 
     if (typeof ResizeObserver !== "undefined") {
@@ -1522,27 +1380,21 @@ function createRemoteTile(participant) {
     }
 
     updateParticipantCount();
-
     return tile;
 }
 
 function flushPendingRemoteDrawingHistory(identity) {
     const key = String(identity || "");
-    if (!key || !remoteParticipants.has(key)) {
-        return;
-    }
+    if (!key || !remoteParticipants.has(key)) return;
 
     const events = pendingRemoteDrawingHistory.get(key);
-    if (!Array.isArray(events) || !events.length) {
-        return;
-    }
+    if (!Array.isArray(events) || !events.length) return;
 
     pendingRemoteDrawingHistory.delete(key);
 
     events.forEach((event) => {
-        try {
-            handleRemoteDraw(event);
-        } catch (error) {
+        try { handleRemoteDraw(event); }
+        catch (error) {
             console.warn("⚠️ Could not replay drawing history:", error);
         }
     });
@@ -1553,21 +1405,14 @@ function removeRemoteTile(identity) {
     const tile = remoteParticipants.get(key);
     if (!tile) return;
 
-    try {
-        tile.video.srcObject = null;
-    } catch (_) {}
-    try {
-        tile.screenVideo.srcObject = null;
-    } catch (_) {}
-    try {
-        tile.audio.srcObject = null;
-    } catch (_) {}
+    try { tile.video.srcObject = null; } catch (_) {}
+    try { tile.screenVideo.srcObject = null; } catch (_) {}
+    try { tile.audio.srcObject = null; } catch (_) {}
 
     if (tile.card) tile.card.remove();
 
     remoteParticipants.delete(key);
     pendingRemoteDrawingHistory.delete(key);
-
     updateParticipantCount();
 }
 
@@ -1582,11 +1427,11 @@ function attachRemoteVideo(participant, track) {
 
     try {
         track.attach(tile.video);
-
-        tile.video.style.transform = "scaleX(-1)";
+        // Restore camera video if it was hidden by an earlier bug.
         tile.video.style.display = "block";
         tile.video.style.visibility = "visible";
         tile.video.style.opacity = "1";
+        tile.video.style.transform = "scaleX(-1)";
         tile.canvas.style.transform = "none";
         tile.waiting.style.display = "none";
         tile.video.play().catch(() => {});
@@ -1609,7 +1454,7 @@ function attachRemoteAudio(participant, track) {
     }
 }
 
-// New: screen share attach/detach
+// ----- Screen share attach / detach --------------------------
 function attachRemoteScreenShare(participant, track) {
     const tile = createRemoteTile(participant);
     if (!tile || !track) return;
@@ -1618,9 +1463,9 @@ function attachRemoteScreenShare(participant, track) {
         track.attach(tile.screenVideo);
         tile.screenVideo.style.display = "block";
         tile.screenTrack = track;
-        // Hide the camera video + drawing canvas overlay while sharing.
-        tile.video.style.display = "none";
         tile.waiting.style.display = "none";
+        // Hide the drawing canvas while showing the screen share so
+        // the shared screen is not covered by local strokes.
         tile.canvas.style.opacity = "0";
         tile.screenVideo.play().catch(() => {});
     } catch (error) {
@@ -1634,16 +1479,11 @@ function detachRemoteScreenShare(participant, track) {
     const tile = remoteParticipants.get(identity);
     if (!tile) return;
 
-    try {
-        track.detach(tile.screenVideo);
-    } catch (_) {}
+    try { track.detach(tile.screenVideo); } catch (_) {}
 
     tile.screenVideo.style.display = "none";
     tile.screenVideo.srcObject = null;
     tile.screenTrack = null;
-
-    // Restore the camera view and drawing canvas.
-    tile.video.style.display = "block";
     tile.canvas.style.opacity = "";
 }
 
@@ -1654,12 +1494,8 @@ function detachParticipantTrack(participant, track) {
     const tile = remoteParticipants.get(identity);
     if (!tile) return;
 
-    try {
-        track.detach(tile.video);
-    } catch (_) {}
-    try {
-        track.detach(tile.audio);
-    } catch (_) {}
+    try { track.detach(tile.video); } catch (_) {}
+    try { track.detach(tile.audio); } catch (_) {}
 
     try {
         if (track.kind === window.LivekitClient.Track.Kind.Video) {
@@ -1681,9 +1517,7 @@ async function startLocalMedia() {
     if (localStream) return localStream;
 
     if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error(
-            "Camera access is not available in this browser/context."
-        );
+        throw new Error("Camera access is not available in this browser/context.");
     }
 
     console.log("🎥 Requesting camera and microphone...");
@@ -1708,48 +1542,35 @@ async function startLocalMedia() {
         cameraStatus.textContent = "✅ Camera & Mic On";
         cameraStatus.style.color = "#4caf50";
     }
-
     if (homeStartCamera) {
         homeStartCamera.textContent = "✅ Camera Started";
         homeStartCamera.disabled = true;
     }
-
     if (startCameraBtn) {
         startCameraBtn.textContent = "✅ Camera On";
         startCameraBtn.disabled = true;
     }
 
-    if (isMeetingCreator || canvasEnabled) {
-        initMediaPipe();
-    }
+    if (isMeetingCreator || canvasEnabled) initMediaPipe();
 
     setTimeout(setupCanvasSizes, 300);
-
     console.log("✅ Camera and microphone started.");
-
     return localStream;
 }
 
 async function startCameraFromHome() {
     if (isCameraStarted) return;
-
-    userName =
-        (userNameInput?.value || "").trim().slice(0, 30) || "Participant";
-
+    userName = (userNameInput?.value || "").trim().slice(0, 30) || "Participant";
     localStorage.setItem("airCanvasUserName", userName);
     updateLocalUI();
 
-    try {
-        await startLocalMedia();
-    } catch (error) {
+    try { await startLocalMedia(); }
+    catch (error) {
         console.error("❌ Camera/Microphone error:", error);
-
         if (cameraStatus) {
-            cameraStatus.textContent =
-                "❌ Camera/Microphone access denied";
+            cameraStatus.textContent = "❌ Camera/Microphone access denied";
             cameraStatus.style.color = "#f44336";
         }
-
         if (homeStartCamera) {
             homeStartCamera.disabled = false;
             homeStartCamera.textContent = "🎥 Start Camera";
@@ -1759,47 +1580,33 @@ async function startCameraFromHome() {
 
 async function startCameraFromMeeting() {
     if (isCameraStarted) return;
-
-    try {
-        await startLocalMedia();
-    } catch (error) {
+    try { await startLocalMedia(); }
+    catch (error) {
         console.error("❌ Camera error:", error);
         alert("Could not access camera and microphone.");
     }
 }
 
 function stopLocalMedia() {
-    if (camera) {
-        try {
-            camera.stop();
-        } catch (_) {}
-        camera = null;
-    }
-
+    if (camera) { try { camera.stop(); } catch (_) {} camera = null; }
     if (localStream) {
         localStream.getTracks().forEach((track) => {
-            try {
-                track.stop();
-            } catch (_) {}
+            try { track.stop(); } catch (_) {}
         });
     }
-
     localStream = null;
     isCameraStarted = false;
     mediaPipeStarted = false;
     hands = null;
-
     if (video) video.srcObject = null;
 }
 
 // ============================================================
-// MEDIAPIPE + GESTURE PREDICTION
+// MEDIAPIPE
 // ============================================================
 
 function initMediaPipe() {
-    if (mediaPipeStarted || !window.Hands || !window.Camera) {
-        return;
-    }
+    if (mediaPipeStarted || !window.Hands || !window.Camera) return;
 
     try {
         hands = new Hands({
@@ -1819,10 +1626,8 @@ function initMediaPipe() {
         camera = new Camera(video, {
             onFrame: async () => {
                 if (!video.videoWidth) return;
-
-                try {
-                    await hands.send({ image: video });
-                } catch (error) {
+                try { await hands.send({ image: video }); }
+                catch (error) {
                     console.warn("⚠️ MediaPipe frame error:", error);
                 }
             },
@@ -1832,7 +1637,6 @@ function initMediaPipe() {
 
         camera.start();
         mediaPipeStarted = true;
-
         console.log("🖐️ MediaPipe started.");
     } catch (error) {
         console.error("❌ MediaPipe initialization failed:", error);
@@ -1840,20 +1644,12 @@ function initMediaPipe() {
 }
 
 function stopMediaPipeOnly() {
-    if (camera) {
-        try {
-            camera.stop();
-        } catch (_) {}
-    }
-
+    if (camera) { try { camera.stop(); } catch (_) {} }
     camera = null;
     hands = null;
     mediaPipeStarted = false;
 
-    if (landmarkCanvas) {
-        clearCanvasElement(landmarkCanvas);
-    }
-
+    if (landmarkCanvas) clearCanvasElement(landmarkCanvas);
     resetDrawingState();
 
     const restoreLocalPreview = () => {
@@ -1861,7 +1657,6 @@ function stopMediaPipeOnly() {
             video.play().catch(() => {});
         }
     };
-
     restoreLocalPreview();
     setTimeout(restoreLocalPreview, 0);
     setTimeout(restoreLocalPreview, 120);
@@ -1890,32 +1685,22 @@ function onResults(results) {
     if (landmarkCanvas) {
         const ctx = landmarkCanvas.getContext("2d");
 
-        if (
-            typeof HAND_CONNECTIONS !== "undefined" &&
-            Array.isArray(HAND_CONNECTIONS)
-        ) {
+        if (typeof HAND_CONNECTIONS !== "undefined" &&
+            Array.isArray(HAND_CONNECTIONS)) {
             ctx.strokeStyle = "#00FF00";
             ctx.lineWidth = 2;
             ctx.beginPath();
 
             for (const [i, j] of HAND_CONNECTIONS) {
-                const p1 = landmarkToCanvasPixel(
-                    landmarks[i].x,
-                    landmarks[i].y
-                );
-                const p2 = landmarkToCanvasPixel(
-                    landmarks[j].x,
-                    landmarks[j].y
-                );
+                const p1 = landmarkToCanvasPixel(landmarks[i].x, landmarks[i].y);
+                const p2 = landmarkToCanvasPixel(landmarks[j].x, landmarks[j].y);
                 ctx.moveTo(p1.x, p1.y);
                 ctx.lineTo(p2.x, p2.y);
             }
-
             ctx.stroke();
         }
 
         ctx.fillStyle = "#FF0000";
-
         for (const lm of landmarks) {
             const p = landmarkToCanvasPixel(lm.x, lm.y);
             ctx.beginPath();
@@ -1925,21 +1710,13 @@ function onResults(results) {
     }
 
     const values = [];
+    for (const point of landmarks) values.push(point.x, point.y);
 
-    for (const point of landmarks) {
-        values.push(point.x, point.y);
-    }
-
-    if (activeGesture === "draw") {
-        drawGesture(values);
-    } else if (activeGesture === "erase") {
-        eraseGesture(values);
-    } else {
-        resetDrawingState();
-    }
+    if (activeGesture === "draw") drawGesture(values);
+    else if (activeGesture === "erase") eraseGesture(values);
+    else resetDrawingState();
 
     const now = performance.now();
-
     if (now - lastPredictionTime >= PREDICTION_INTERVAL_MS) {
         lastPredictionTime = now;
         pendingLandmarks = values;
@@ -1948,28 +1725,20 @@ function onResults(results) {
 }
 
 async function requestGesturePrediction() {
-    if (predictionInProgress || !pendingLandmarks) {
-        return;
-    }
+    if (predictionInProgress || !pendingLandmarks) return;
 
     predictionInProgress = true;
-
     const landmarks = pendingLandmarks;
     pendingLandmarks = null;
 
     try {
         const response = await fetch(`${BACKEND_URL}/predict`, {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ landmarks })
         });
 
-        if (!response.ok) {
-            throw new Error(`Prediction HTTP ${response.status}`);
-        }
-
+        if (!response.ok) throw new Error(`Prediction HTTP ${response.status}`);
         const result = await response.json();
 
         const gesture = String(
@@ -1978,35 +1747,28 @@ async function requestGesturePrediction() {
                 result.prediction ||
                 "no_gesture"
         ).toLowerCase();
-
         const confidence = Number(result.confidence) || 0;
 
         updateGestureDisplay(gesture, confidence);
 
         if (gesture === "clear") {
             const now = Date.now();
-
             if (now - lastClearTime >= CLEAR_COOLDOWN_MS) {
                 lastClearTime = now;
                 clearMyCanvasAndBroadcast();
             }
-
             resetDrawingState();
         } else if (gesture !== "draw" && gesture !== "erase") {
             resetDrawingState();
         }
     } catch (error) {
         console.error("❌ Backend prediction error:", error);
-
         activeGesture = "no_gesture";
         activeConfidence = 0;
         resetDrawingState();
     } finally {
         predictionInProgress = false;
-
-        if (pendingLandmarks) {
-            requestGesturePrediction();
-        }
+        if (pendingLandmarks) requestGesturePrediction();
     }
 }
 
@@ -2015,17 +1777,12 @@ function updateGestureDisplay(gesture, confidence) {
     activeConfidence = Number(confidence) || 0;
 
     if (gestureDisplay) {
-        gestureDisplay.textContent =
-            activeGesture === "no_gesture"
-                ? "NO GESTURE"
-                : activeGesture.toUpperCase();
+        gestureDisplay.textContent = activeGesture === "no_gesture"
+            ? "NO GESTURE" : activeGesture.toUpperCase();
     }
-
     if (confidenceDisplay) {
-        confidenceDisplay.textContent =
-            activeGesture === "no_gesture"
-                ? "--"
-                : `${Math.round(activeConfidence * 100)}%`;
+        confidenceDisplay.textContent = activeGesture === "no_gesture"
+            ? "--" : `${Math.round(activeConfidence * 100)}%`;
     }
 }
 
@@ -2048,16 +1805,11 @@ function drawGesture(values) {
 
     const lmX = Number(values[16]);
     const lmY = Number(values[17]);
-
-    if (!Number.isFinite(lmX) || !Number.isFinite(lmY)) {
-        return;
-    }
+    if (!Number.isFinite(lmX) || !Number.isFinite(lmY)) return;
 
     const pixel = landmarkToCanvasPixel(lmX, lmY);
-
     const targetX = clamp(pixel.x, 0, airCanvas.width);
     const targetY = clamp(pixel.y, 0, airCanvas.height);
-
     const smoothing = 0.45;
 
     if (smoothDrawX === null) {
@@ -2075,20 +1827,14 @@ function drawGesture(values) {
         isDrawing = true;
         lastDrawX = x;
         lastDrawY = y;
-        drawDot(
-            airCanvas,
-            x / airCanvas.width,
-            y / airCanvas.height,
-            "draw"
-        );
+        drawDot(airCanvas, x / airCanvas.width, y / airCanvas.height, "draw");
         return;
     }
 
     const distance = Math.hypot(x - lastDrawX, y - lastDrawY);
     if (distance < 0.5) return;
 
-    const maxJump =
-        Math.max(airCanvas.width, airCanvas.height) * 0.12;
+    const maxJump = Math.max(airCanvas.width, airCanvas.height) * 0.12;
     if (distance > maxJump) {
         lastDrawX = x;
         lastDrawY = y;
@@ -2121,18 +1867,13 @@ function eraseGesture(values) {
 
     const lmX = Number(values[16]);
     const lmY = Number(values[17]);
-
-    if (!Number.isFinite(lmX) || !Number.isFinite(lmY)) {
-        return;
-    }
+    if (!Number.isFinite(lmX) || !Number.isFinite(lmY)) return;
 
     const pixel = landmarkToCanvasPixel(lmX, lmY);
-
     const px = clamp(pixel.x, 0, airCanvas.width);
     const py = clamp(pixel.y, 0, airCanvas.height);
 
     const ctx = airCanvas.getContext("2d");
-
     ctx.globalCompositeOperation = "destination-out";
     ctx.beginPath();
     ctx.arc(px, py, 20, 0, Math.PI * 2);
@@ -2146,13 +1887,11 @@ function eraseGesture(values) {
         py / airCanvas.height,
         "erase"
     );
-
     resetDrawingState();
 }
 
 function drawLine(canvas, x1, y1, x2, y2, action = "draw") {
     if (!canvas) return;
-
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
@@ -2178,13 +1917,11 @@ function drawLine(canvas, x1, y1, x2, y2, action = "draw") {
 
 function drawDot(canvas, x, y, action = "draw") {
     if (!canvas) return;
-
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     ctx.globalCompositeOperation =
         action === "erase" ? "destination-out" : "source-over";
-
     ctx.fillStyle = "#00ff00";
 
     ctx.beginPath();
@@ -2201,22 +1938,12 @@ function drawDot(canvas, x, y, action = "draw") {
 }
 
 function sendDrawData(x, y, prevX, prevY, action) {
-    if (!isMeetingCreator && !canvasEnabled) {
-        return;
-    }
-
-    if (!meetingActive || !liveKitConnected) {
-        return;
-    }
+    if (!isMeetingCreator && !canvasEnabled) return;
+    if (!meetingActive || !liveKitConnected) return;
 
     const now = performance.now();
-
-    if (
-        action === "draw" &&
-        now - lastDrawSendTime < DRAW_SEND_INTERVAL_MS
-    ) {
-        return;
-    }
+    if (action === "draw" &&
+        now - lastDrawSendTime < DRAW_SEND_INTERVAL_MS) return;
 
     lastDrawSendTime = now;
 
@@ -2226,11 +1953,8 @@ function sendDrawData(x, y, prevX, prevY, action) {
     let prevLocalX = clamp(Number(prevX), 0, 1);
     let prevLocalY = Number(prevY);
 
-    if (
-        action !== "erase" &&
-        lastSentDrawX !== null &&
-        lastSentDrawY !== null
-    ) {
+    if (action !== "erase" &&
+        lastSentDrawX !== null && lastSentDrawY !== null) {
         prevLocalX = lastSentDrawX;
         prevLocalY = lastSentDrawY;
     }
@@ -2257,7 +1981,6 @@ function sendDrawData(x, y, prevX, prevY, action) {
     };
 
     sendWS(message);
-
     localDrawingHistory.push(message);
 }
 
@@ -2266,16 +1989,10 @@ function clearMyCanvasAndBroadcast() {
         isMeetingCreator ||
         canvasEnabled ||
         localDrawingHistory.length > 0;
-
-    if (!canClear) {
-        return;
-    }
+    if (!canClear) return;
 
     clearLocalCanvas();
-
-    if (!meetingActive || !liveKitConnected) {
-        return;
-    }
+    if (!meetingActive || !liveKitConnected) return;
 
     sendWS({
         type: "clear_canvas",
@@ -2286,25 +2003,15 @@ function clearMyCanvasAndBroadcast() {
     });
 }
 
-// ============================================================
-// LATE-JOIN DRAWING SYNC
-// ============================================================
-
 function sendDrawingHistoryTo(targetIdentity) {
     const target = String(targetIdentity || "");
     if (!target) return;
     if (!localDrawingHistory.length) return;
     if (!liveKitConnected || !liveKitRoom?.localParticipant) return;
 
-    for (
-        let i = 0;
-        i < localDrawingHistory.length;
-        i += DRAWING_HISTORY_CHUNK_SIZE
-    ) {
-        const chunk = localDrawingHistory.slice(
-            i,
-            i + DRAWING_HISTORY_CHUNK_SIZE
-        );
+    for (let i = 0; i < localDrawingHistory.length;
+         i += DRAWING_HISTORY_CHUNK_SIZE) {
+        const chunk = localDrawingHistory.slice(i, i + DRAWING_HISTORY_CHUNK_SIZE);
 
         sendLiveKitData(
             {
@@ -2339,50 +2046,33 @@ function resolveRemoteIdentity(data) {
     if (direct && remoteParticipants.has(String(direct))) {
         return String(direct);
     }
-
-    if (
-        data.user_id &&
-        userIdToLiveKitIdentity.has(String(data.user_id))
-    ) {
+    if (data.user_id && userIdToLiveKitIdentity.has(String(data.user_id))) {
         return userIdToLiveKitIdentity.get(String(data.user_id));
     }
-
     return direct ? String(direct) : null;
 }
 
 function handleRemoteDraw(data) {
     const identity = resolveRemoteIdentity(data);
-
-    if (!identity || identity === liveKitIdentity) {
-        return;
-    }
+    if (!identity || identity === liveKitIdentity) return;
 
     const tile = remoteParticipants.get(identity);
-
-    if (!tile?.canvas) {
-        return;
-    }
+    if (!tile?.canvas) return;
 
     resizeRemoteCanvas(tile);
 
     const x = Number(data.x);
     const y = Number(data.y);
-
-    if (!Number.isFinite(x) || !Number.isFinite(y)) {
-        return;
-    }
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
 
     if (data.action === "erase") {
         const ctx = tile.canvas.getContext("2d");
-
         ctx.globalCompositeOperation = "destination-out";
         ctx.beginPath();
         ctx.arc(
             clamp(x, 0, 1) * tile.canvas.width,
             clamp(y, 0, 1) * tile.canvas.height,
-            20,
-            0,
-            Math.PI * 2
+            20, 0, Math.PI * 2
         );
         ctx.fill();
         ctx.globalCompositeOperation = "source-over";
@@ -2401,20 +2091,14 @@ function handleRemoteDraw(data) {
 
 function handleRemoteClear(data) {
     const identity = resolveRemoteIdentity(data);
-
-    if (!identity || identity === liveKitIdentity) {
-        return;
-    }
+    if (!identity || identity === liveKitIdentity) return;
 
     const tile = remoteParticipants.get(identity);
-
-    if (tile) {
-        clearCanvasElement(tile.canvas);
-    }
+    if (tile) clearCanvasElement(tile.canvas);
 }
 
 // ============================================================
-// LIVEKIT DATA MESSAGING
+// LIVEKIT DATA
 // ============================================================
 
 async function sendLiveKitData(message, options = {}) {
@@ -2422,7 +2106,6 @@ async function sendLiveKitData(message, options = {}) {
         console.warn("⚠️ LiveKit data channel is not ready.");
         return false;
     }
-
     try {
         const payload = new TextEncoder().encode(JSON.stringify(message));
         await liveKitRoom.localParticipant.publishData(payload, {
@@ -2467,29 +2150,22 @@ function handleLiveKitData(payload, participant) {
         const decoded = new TextDecoder().decode(payload);
         const data = JSON.parse(decoded);
         const senderIdentity = participant?.identity
-            ? String(participant.identity)
-            : "";
+            ? String(participant.identity) : "";
 
         if (data.type === "participant_hello") {
             if (!senderIdentity) return;
 
             const info = participantInfo.get(senderIdentity) || {
                 userId: senderIdentity,
-                name:
-                    data.user_name ||
-                    participant?.name ||
-                    "Participant",
+                name: data.user_name || participant?.name || "Participant",
                 isCreator: Boolean(data.is_creator),
                 livekitIdentity: senderIdentity,
                 canvasEnabled: Boolean(data.canvas_enabled)
             };
 
             info.userId = senderIdentity;
-            info.name =
-                data.user_name ||
-                info.name ||
-                participant?.name ||
-                "Participant";
+            info.name = data.user_name || info.name ||
+                participant?.name || "Participant";
             info.isCreator = Boolean(data.is_creator);
             info.livekitIdentity = senderIdentity;
             info.canvasEnabled = Boolean(data.canvas_enabled);
@@ -2497,15 +2173,11 @@ function handleLiveKitData(payload, participant) {
             userIdToLiveKitIdentity.set(senderIdentity, senderIdentity);
             liveKitIdentityToUserId.set(senderIdentity, senderIdentity);
 
-            // New: adopt any pre-existing raised-hand state.
             if (data.raised_hand) {
                 raisedHands.add(senderIdentity);
                 const tile = remoteParticipants.get(senderIdentity);
                 if (tile) {
-                    const base =
-                        tile.participant?.name ||
-                        info.name ||
-                        "Participant";
+                    const base = tile.participant?.name || info.name || "Participant";
                     tile.label.textContent = base + " ✋";
                 }
             }
@@ -2517,17 +2189,12 @@ function handleLiveKitData(payload, participant) {
         }
 
         if (senderIdentity) {
-            data.user_id =
-                data.user_id || data.target_user_id || senderIdentity;
-            data.livekit_identity =
-                data.livekit_identity ||
+            data.user_id = data.user_id || data.target_user_id || senderIdentity;
+            data.livekit_identity = data.livekit_identity ||
                 data.target_livekit_identity ||
                 (data.target_user_id ? data.target_user_id : senderIdentity);
-            data.user_name =
-                data.user_name ||
-                data.target_user_name ||
-                participant?.name ||
-                "Participant";
+            data.user_name = data.user_name || data.target_user_name ||
+                participant?.name || "Participant";
         }
 
         handleWebSocketMessage(data);
@@ -2537,16 +2204,13 @@ function handleLiveKitData(payload, participant) {
 }
 
 // ============================================================
-// WEBSOCKET COMPATIBILITY LAYER
+// WEBSOCKET COMPATIBILITY
 // ============================================================
 
 function sendWS(message) {
     if (!message) return false;
-
     const type = message.type;
-    if (type === "create_meeting" || type === "join_meeting") {
-        return true;
-    }
+    if (type === "create_meeting" || type === "join_meeting") return true;
 
     let destinationIdentities = [];
     if (type === "grant_drawing" || type === "revoke_drawing") {
@@ -2557,30 +2221,20 @@ function sendWS(message) {
                 (remoteParticipants.has(targetId) ? targetId : "") ||
                 targetId
         );
-
-        if (targetIdentity) {
-            destinationIdentities = [targetIdentity];
-        }
-
+        if (targetIdentity) destinationIdentities = [targetIdentity];
         message.target_user_id = targetId || targetIdentity;
         message.target_livekit_identity = targetIdentity;
         message.user_id = targetIdentity;
         message.livekit_identity = targetIdentity;
     }
 
-    const reliable = true;
     sendLiveKitData(message, {
-        reliable,
+        reliable: true,
         destinationIdentities,
-        topic:
-            type === "draw_data"
-                ? "aircanvas-draw"
-                : "aircanvas-control"
+        topic: type === "draw_data" ? "aircanvas-draw" : "aircanvas-control"
     });
 
-    if (type !== "draw_data") {
-        console.log("📤 LiveKit Data:", message);
-    }
+    if (type !== "draw_data") console.log("📤 LiveKit Data:", message);
     return true;
 }
 
@@ -2596,37 +2250,26 @@ function handleWebSocketMessage(data) {
         case "self_info":
             if (data.user_id) userId = data.user_id;
             if (data.user_name) userName = data.user_name;
-
             if (data.is_creator !== undefined) {
-                if (isMeetingCreator) {
-                    isMeetingCreator = true;
-                } else {
-                    isMeetingCreator = Boolean(data.is_creator);
-                }
+                isMeetingCreator = isMeetingCreator
+                    ? true : Boolean(data.is_creator);
             }
-
             if (data.livekit_identity) {
                 liveKitIdentity = String(data.livekit_identity);
             }
 
-            canvasEnabled =
-                Boolean(isMeetingCreator) ||
-                Boolean(data.canvas_enabled) ||
-                Boolean(data.is_creator);
+            canvasEnabled = Boolean(isMeetingCreator) ||
+                Boolean(data.canvas_enabled) || Boolean(data.is_creator);
 
             if (isMeetingCreator || canvasEnabled) {
-                if (!mediaPipeStarted && video?.srcObject) {
-                    initMediaPipe();
-                }
+                if (!mediaPipeStarted && video?.srcObject) initMediaPipe();
             } else {
                 stopMediaPipeOnly();
             }
 
             updateCanvasAvailability();
-
             localStorage.setItem("airCanvasUserId", userId);
             localStorage.setItem("airCanvasUserName", userName);
-
             updateLocalUI();
             break;
 
@@ -2637,8 +2280,7 @@ function handleWebSocketMessage(data) {
                     name: data.creator_name || "Host",
                     isCreator: true,
                     livekitIdentity: data.creator_livekit_identity
-                        ? String(data.creator_livekit_identity)
-                        : null,
+                        ? String(data.creator_livekit_identity) : null,
                     canvasEnabled: true
                 });
             }
@@ -2646,25 +2288,21 @@ function handleWebSocketMessage(data) {
 
         case "participant_joined": {
             const id = data.user_id ? String(data.user_id) : null;
-
             if (id) {
                 participantInfo.set(id, {
                     userId: id,
                     name: data.user_name || "Participant",
                     isCreator: Boolean(data.is_creator),
                     livekitIdentity: data.livekit_identity
-                        ? String(data.livekit_identity)
-                        : null,
+                        ? String(data.livekit_identity) : null,
                     canvasEnabled: Boolean(data.canvas_enabled)
                 });
-
                 if (data.livekit_identity) {
                     const identity = String(data.livekit_identity);
                     userIdToLiveKitIdentity.set(id, identity);
                     liveKitIdentityToUserId.set(identity, id);
                 }
             }
-
             updateParticipantCount();
             renderDrawingPermissions();
             break;
@@ -2674,15 +2312,12 @@ function handleWebSocketMessage(data) {
             if (data.user_id) {
                 const id = String(data.user_id);
                 const identity = userIdToLiveKitIdentity.get(id);
-
                 if (identity) removeRemoteTile(identity);
-
                 userIdToLiveKitIdentity.delete(id);
                 participantInfo.delete(id);
                 drawingPermissionRequests.delete(id);
                 raisedHands.delete(id);
             }
-
             if (data.livekit_identity) {
                 const identity = String(data.livekit_identity);
                 removeRemoteTile(identity);
@@ -2690,7 +2325,6 @@ function handleWebSocketMessage(data) {
                 drawingPermissionRequests.delete(identity);
                 raisedHands.delete(identity);
             }
-
             updateParticipantCount();
             renderDrawingPermissions();
             renderParticipantsList();
@@ -2698,35 +2332,22 @@ function handleWebSocketMessage(data) {
         }
 
         case "request_drawing":
-        case "drawing_permission_request": {
-            // Participants no longer request permission.
+        case "drawing_permission_request":
             break;
-        }
 
-        case "drawing_permission_denied": {
-            console.log(
-                "🚫 Drawing permission unavailable:",
-                data.message || ""
-            );
+        case "drawing_permission_denied":
+            console.log("🚫 Drawing permission unavailable:", data.message || "");
             break;
-        }
 
         case "grant_drawing":
         case "drawing_permission": {
-            const id =
-                data.target_livekit_identity
-                    ? String(data.target_livekit_identity)
-                    : data.target_user_id
-                    ? String(data.target_user_id)
-                    : data.user_id
-                    ? String(data.user_id)
-                    : null;
-
-            const permissionEnabled =
-                data.type === "grant_drawing"
-                    ? true
-                    : Boolean(data.canvas_enabled);
-
+            const id = data.target_livekit_identity
+                ? String(data.target_livekit_identity)
+                : data.target_user_id
+                ? String(data.target_user_id)
+                : data.user_id ? String(data.user_id) : null;
+            const permissionEnabled = data.type === "grant_drawing"
+                ? true : Boolean(data.canvas_enabled);
             if (!id) break;
 
             const existing = participantInfo.get(id) || {
@@ -2734,68 +2355,42 @@ function handleWebSocketMessage(data) {
                 name: data.user_name || "Participant",
                 isCreator: false
             };
-
             existing.canvasEnabled = permissionEnabled;
 
             if (data.livekit_identity) {
                 existing.livekitIdentity = String(data.livekit_identity);
-                userIdToLiveKitIdentity.set(
-                    id,
-                    String(data.livekit_identity)
-                );
-                liveKitIdentityToUserId.set(
-                    String(data.livekit_identity),
-                    id
-                );
+                userIdToLiveKitIdentity.set(id, String(data.livekit_identity));
+                liveKitIdentityToUserId.set(String(data.livekit_identity), id);
             }
-
             participantInfo.set(id, existing);
+            if (isMeetingCreator) drawingPermissionRequests.delete(id);
 
-            if (isMeetingCreator) {
-                drawingPermissionRequests.delete(id);
-            }
-
-            if (
-                id === String(userId) ||
-                id === String(liveKitIdentity)
-            ) {
+            if (id === String(userId) || id === String(liveKitIdentity)) {
                 canvasEnabled = permissionEnabled;
-
                 if (canvasEnabled) {
-                    if (!mediaPipeStarted) {
-                        initMediaPipe();
-                    }
+                    if (!mediaPipeStarted) initMediaPipe();
                 } else {
-                    if (landmarkCanvas) {
-                        clearCanvasElement(landmarkCanvas);
-                    }
+                    if (landmarkCanvas) clearCanvasElement(landmarkCanvas);
                     resetDrawingState();
                 }
-
                 updateCanvasAvailability();
             } else {
                 renderDrawingPermissions();
             }
-
             console.log(
                 `🎨 Drawing permission for ${existing.name}: ${
                     existing.canvasEnabled ? "ENABLED" : "DISABLED"
                 }`
             );
-
             break;
         }
 
         case "revoke_drawing": {
-            const id =
-                data.target_livekit_identity
-                    ? String(data.target_livekit_identity)
-                    : data.target_user_id
-                    ? String(data.target_user_id)
-                    : data.user_id
-                    ? String(data.user_id)
-                    : null;
-
+            const id = data.target_livekit_identity
+                ? String(data.target_livekit_identity)
+                : data.target_user_id
+                ? String(data.target_user_id)
+                : data.user_id ? String(data.user_id) : null;
             if (!id) break;
 
             const existing = participantInfo.get(id) || {
@@ -2803,66 +2398,39 @@ function handleWebSocketMessage(data) {
                 name: data.user_name || "Participant",
                 isCreator: false
             };
-
             existing.canvasEnabled = false;
 
             if (data.livekit_identity) {
                 existing.livekitIdentity = String(data.livekit_identity);
-                userIdToLiveKitIdentity.set(
-                    id,
-                    String(data.livekit_identity)
-                );
-                liveKitIdentityToUserId.set(
-                    String(data.livekit_identity),
-                    id
-                );
+                userIdToLiveKitIdentity.set(id, String(data.livekit_identity));
+                liveKitIdentityToUserId.set(String(data.livekit_identity), id);
             }
-
             participantInfo.set(id, existing);
+            if (isMeetingCreator) drawingPermissionRequests.delete(id);
 
-            if (isMeetingCreator) {
-                drawingPermissionRequests.delete(id);
-            }
-
-            if (
-                id === String(userId) ||
-                id === String(liveKitIdentity)
-            ) {
+            if (id === String(userId) || id === String(liveKitIdentity)) {
                 canvasEnabled = false;
-
-                if (landmarkCanvas) {
-                    clearCanvasElement(landmarkCanvas);
-                }
+                if (landmarkCanvas) clearCanvasElement(landmarkCanvas);
                 resetDrawingState();
-
                 updateCanvasAvailability();
             } else {
                 renderDrawingPermissions();
             }
-
             console.log(
                 `🎨 Drawing permission for ${existing.name}: DISABLED (revoked)`
             );
-
             break;
         }
 
         case "room_participants": {
             const incoming = Array.isArray(data.participants)
-                ? data.participants
-                : [];
-
+                ? data.participants : [];
             incoming.forEach((participant) => {
                 const id = participant.user_id
-                    ? String(participant.user_id)
-                    : null;
-
+                    ? String(participant.user_id) : null;
                 if (!id) return;
-
                 const identity = participant.livekit_identity
-                    ? String(participant.livekit_identity)
-                    : null;
-
+                    ? String(participant.livekit_identity) : null;
                 participantInfo.set(id, {
                     userId: id,
                     name: participant.user_name || "Participant",
@@ -2870,41 +2438,28 @@ function handleWebSocketMessage(data) {
                     livekitIdentity: identity,
                     canvasEnabled: Boolean(participant.canvas_enabled)
                 });
-
                 if (identity) {
                     userIdToLiveKitIdentity.set(id, identity);
                     liveKitIdentityToUserId.set(identity, id);
                 }
-
                 if (id === String(userId)) {
-                    canvasEnabled =
-                        Boolean(participant.canvas_enabled) ||
+                    canvasEnabled = Boolean(participant.canvas_enabled) ||
                         Boolean(participant.is_creator);
                 }
             });
-
             if (isMeetingCreator || canvasEnabled) {
-                if (!mediaPipeStarted) {
-                    initMediaPipe();
-                }
+                if (!mediaPipeStarted) initMediaPipe();
             }
-
             updateCanvasAvailability();
             renderDrawingPermissions();
-
             break;
         }
 
         case "drawing_history": {
             const events = Array.isArray(data.events) ? data.events : [];
-
             events.forEach((event) => {
                 const identity = resolveRemoteIdentity(event);
-
-                if (!identity || identity === liveKitIdentity) {
-                    return;
-                }
-
+                if (!identity || identity === liveKitIdentity) return;
                 if (remoteParticipants.has(identity)) {
                     handleRemoteDraw(event);
                 } else {
@@ -2929,8 +2484,6 @@ function handleWebSocketMessage(data) {
             handleRemoteClear(data);
             break;
 
-        // ----- New: reactions & hand raise --------------------
-
         case "reaction": {
             const emoji = String(data.emoji || "");
             const senderId = String(data.livekit_identity || "");
@@ -2944,7 +2497,8 @@ function handleWebSocketMessage(data) {
                 "Someone";
 
             showReactionBubble(senderId, emoji);
-            showMeetingNotification(`${emoji} ${name} reacted`);
+            // Requested format: emoji on both sides.
+            showMeetingNotification(`${emoji} ${name} reacted ${emoji}`);
             break;
         }
 
@@ -2961,22 +2515,17 @@ function handleWebSocketMessage(data) {
 
             if (raised) {
                 raisedHands.add(senderId);
-                showMeetingNotification(
-                    `✋ ${name} raised their hand`
-                );
+                showMeetingNotification(`✋ ${name} raised their hand`);
             } else {
                 raisedHands.delete(senderId);
                 showMeetingNotification(`${name} lowered their hand`);
             }
 
-            // Update the tile label with a small hand indicator.
             const tile = remoteParticipants.get(senderId);
             if (tile) {
-                const base =
-                    tile.participant?.name || name || "Participant";
+                const base = tile.participant?.name || name || "Participant";
                 tile.label.textContent = base + (raised ? " ✋" : "");
             }
-
             renderParticipantsList();
             break;
         }
@@ -3001,9 +2550,7 @@ function handleWebSocketMessage(data) {
         }
 
         case "room_full":
-            alert(
-                `This meeting is full. Maximum ${MAX_PARTICIPANTS} participants.`
-            );
+            alert(`This meeting is full. Maximum ${MAX_PARTICIPANTS} participants.`);
             break;
 
         case "error":
@@ -3017,11 +2564,7 @@ function handleWebSocketMessage(data) {
 }
 
 function disconnectWebSocket() {
-    if (ws) {
-        try {
-            ws.close();
-        } catch (_) {}
-    }
+    if (ws) { try { ws.close(); } catch (_) {} }
     ws = null;
 }
 
@@ -3030,24 +2573,15 @@ function disconnectWebSocket() {
 // ============================================================
 
 function loadLiveKitSDK() {
-    if (window.LivekitClient) {
-        return Promise.resolve(window.LivekitClient);
-    }
-
+    if (window.LivekitClient) return Promise.resolve(window.LivekitClient);
     if (liveKitSDKPromise) return liveKitSDKPromise;
 
     liveKitSDKPromise = new Promise((resolve, reject) => {
-        const existing = document.querySelector(
-            'script[data-livekit-sdk="true"]'
-        );
-
+        const existing = document.querySelector('script[data-livekit-sdk="true"]');
         if (existing) {
-            existing.addEventListener("load", () =>
-                resolve(window.LivekitClient)
-            );
+            existing.addEventListener("load", () => resolve(window.LivekitClient));
             existing.addEventListener("error", () =>
-                reject(new Error("LiveKit SDK failed to load."))
-            );
+                reject(new Error("LiveKit SDK failed to load.")));
             return;
         }
 
@@ -3058,18 +2592,10 @@ function loadLiveKitSDK() {
         script.dataset.livekitSdk = "true";
 
         script.onload = () => {
-            if (window.LivekitClient) {
-                resolve(window.LivekitClient);
-            } else {
-                reject(
-                    new Error(
-                        "LiveKit SDK loaded but global was not found."
-                    )
-                );
-            }
+            if (window.LivekitClient) resolve(window.LivekitClient);
+            else reject(new Error("LiveKit SDK loaded but global was not found."));
         };
-        script.onerror = () =>
-            reject(new Error("Could not load LiveKit SDK."));
+        script.onerror = () => reject(new Error("Could not load LiveKit SDK."));
 
         document.head.appendChild(script);
     });
@@ -3083,19 +2609,14 @@ function loadLiveKitSDK() {
 
 async function connectLiveKit() {
     if (liveKitConnected) return;
-
-    if (!meetingId || !localStream) {
-        throw new Error("Meeting or local media missing.");
-    }
+    if (!meetingId || !localStream) throw new Error("Meeting or local media missing.");
 
     const LK = await loadLiveKitSDK();
-
     console.log("🔵 Connecting to LiveKit...");
 
     const tokenSource = LK.TokenSource.developmentTokenServer(
         LIVEKIT_TOKEN_SERVER_ID
     );
-
     const credentials = await tokenSource.fetch({
         roomName: meetingId,
         participantIdentity: liveKitIdentity,
@@ -3106,10 +2627,7 @@ async function connectLiveKit() {
         throw new Error("LiveKit token was not returned.");
     }
 
-    liveKitRoom = new LK.Room({
-        adaptiveStream: true,
-        dynacast: true
-    });
+    liveKitRoom = new LK.Room({ adaptiveStream: true, dynacast: true });
 
     liveKitRoom.on(LK.RoomEvent.DataReceived, (payload, participant) => {
         handleLiveKitData(payload, participant);
@@ -3119,14 +2637,14 @@ async function connectLiveKit() {
         LK.RoomEvent.TrackSubscribed,
         (track, publication, participant) => {
             const identity = String(participant.identity);
-
             if (identity === liveKitIdentity) return;
 
             const tile = createRemoteTile(participant);
             if (!tile) return;
 
             if (track.kind === LK.Track.Kind.Video) {
-                if (isScreenShareTrack(track)) {
+                // Route screenshare vs camera.
+                if (isScreenShareTrack(track, publication)) {
                     attachRemoteScreenShare(participant, track);
                 } else {
                     attachRemoteVideo(participant, track);
@@ -3140,10 +2658,8 @@ async function connectLiveKit() {
     liveKitRoom.on(
         LK.RoomEvent.TrackUnsubscribed,
         (track, publication, participant) => {
-            if (
-                track.kind === LK.Track.Kind.Video &&
-                isScreenShareTrack(track)
-            ) {
+            if (track.kind === LK.Track.Kind.Video &&
+                isScreenShareTrack(track, publication)) {
                 detachRemoteScreenShare(participant, track);
             } else {
                 detachParticipantTrack(participant, track);
@@ -3153,13 +2669,11 @@ async function connectLiveKit() {
 
     liveKitRoom.on(LK.RoomEvent.ParticipantConnected, (participant) => {
         const identity = String(participant.identity);
-
         if (identity === liveKitIdentity) return;
 
         createRemoteTile(participant);
         upsertLiveKitParticipant(participant, false);
 
-        // New: "joined" toast (fires for participants joining after us).
         const name = participant.name || "Someone";
         showMeetingNotification(`👤 ${name} joined the meeting`);
 
@@ -3174,7 +2688,6 @@ async function connectLiveKit() {
             { reliable: true, topic: "aircanvas-control" }
         );
 
-        // Push our existing drawing to the newly-joined peer.
         sendDrawingHistoryTo(identity);
 
         for (const [id, info] of participantInfo) {
@@ -3189,14 +2702,11 @@ async function connectLiveKit() {
     liveKitRoom.on(LK.RoomEvent.ParticipantDisconnected, (participant) => {
         const identity = String(participant.identity);
 
-        // New: "left" toast.
         const info = participantInfo.get(identity);
-        const name =
-            participant.name || info?.name || "Someone";
+        const name = participant.name || info?.name || "Someone";
         showMeetingNotification(`👤 ${name} left the meeting`);
 
         removeRemoteTile(identity);
-
         participantInfo.delete(identity);
         drawingPermissionRequests.delete(identity);
         raisedHands.delete(identity);
@@ -3221,9 +2731,7 @@ async function connectLiveKit() {
     );
 
     liveKitConnected = true;
-
     console.log("✅ LIVEKIT CONNECTED:", liveKitIdentity);
-
     liveKitDataReady = true;
 
     participantInfo.clear();
@@ -3244,7 +2752,6 @@ async function connectLiveKit() {
     );
 
     const cameraTrack = localStream.getVideoTracks()[0];
-
     if (cameraTrack) {
         await liveKitRoom.localParticipant.publishTrack(cameraTrack, {
             name: "air-canvas-camera",
@@ -3253,7 +2760,6 @@ async function connectLiveKit() {
     }
 
     const microphoneTrack = localStream.getAudioTracks()[0];
-
     if (microphoneTrack) {
         await liveKitRoom.localParticipant.publishTrack(microphoneTrack, {
             name: "air-canvas-microphone",
@@ -3267,24 +2773,16 @@ async function connectLiveKit() {
         for (const publication of participant.trackPublications.values()) {
             if (publication.isSubscribed && publication.track) {
                 if (publication.kind === LK.Track.Kind.Video) {
-                    if (isScreenShareTrack(publication.track)) {
-                        attachRemoteScreenShare(
-                            participant,
-                            publication.track
-                        );
+                    if (isScreenShareTrack(publication.track, publication)) {
+                        attachRemoteScreenShare(participant, publication.track);
                     } else {
-                        attachRemoteVideo(
-                            participant,
-                            publication.track
-                        );
+                        attachRemoteVideo(participant, publication.track);
                     }
                 } else if (publication.kind === LK.Track.Kind.Audio) {
                     attachRemoteAudio(participant, publication.track);
                 }
             } else if (!publication.isSubscribed) {
-                try {
-                    publication.setSubscribed(true);
-                } catch (_) {}
+                try { publication.setSubscribed(true); } catch (_) {}
             }
         }
     });
@@ -3294,14 +2792,10 @@ async function connectLiveKit() {
 
 function disconnectLiveKit() {
     if (liveKitRoom) {
-        try {
-            liveKitRoom.disconnect();
-        } catch (_) {}
+        try { liveKitRoom.disconnect(); } catch (_) {}
     }
-
     liveKitRoom = null;
     liveKitConnected = false;
-
     clearRemoteTiles();
 }
 
@@ -3312,21 +2806,13 @@ function disconnectLiveKit() {
 function setupMeetingUI() {
     showMeeting();
 
-    if (meetingIdDisplay) {
-        meetingIdDisplay.textContent = `Meeting ID: ${meetingId}`;
-    }
-
+    if (meetingIdDisplay) meetingIdDisplay.textContent = `Meeting ID: ${meetingId}`;
     if (meetingIdLarge) meetingIdLarge.textContent = meetingId;
 
     updateLocalUI();
 
-    if (remoteParticipantLabel) {
-        remoteParticipantLabel.textContent = "Participant";
-    }
-
-    if (waitingParticipant) {
-        waitingParticipant.style.display = "block";
-    }
+    if (remoteParticipantLabel) remoteParticipantLabel.textContent = "Participant";
+    if (waitingParticipant) waitingParticipant.style.display = "block";
 
     hideLegacyRemoteCard();
     clearRemoteTiles();
@@ -3340,9 +2826,7 @@ function setupMeetingUI() {
 async function createMeeting() {
     if (meetingActive) return;
 
-    userName =
-        (userNameInput?.value || "").trim().slice(0, 30) || "Participant";
-
+    userName = (userNameInput?.value || "").trim().slice(0, 30) || "Participant";
     localStorage.setItem("airCanvasUserName", userName);
     updateLocalUI();
 
@@ -3350,15 +2834,12 @@ async function createMeeting() {
         isMeetingCreator = true;
         canvasEnabled = true;
 
-        if (!isCameraStarted) {
-            await startLocalMedia();
-        }
+        if (!isCameraStarted) await startLocalMedia();
 
         meetingId = generateMeetingId();
         meetingActive = true;
 
         setupMeetingUI();
-
         await connectWebSocket();
         await connectLiveKit();
 
@@ -3367,60 +2848,42 @@ async function createMeeting() {
         updateCanvasAvailability();
 
         if (!mediaPipeStarted) initMediaPipe();
-
         console.log("🎉 Meeting created:", meetingId);
     } catch (error) {
         console.error("❌ Could not create meeting:", error);
-
         meetingActive = false;
         await cleanupMeeting(false);
         showHome();
-
-        alert(
-            "Could not create the meeting. Check the browser console."
-        );
+        alert("Could not create the meeting. Check the browser console.");
     }
 }
 
 async function joinMeeting() {
     if (meetingActive) return;
 
-    userName =
-        (userNameInput?.value || "").trim().slice(0, 30) || "Participant";
-
+    userName = (userNameInput?.value || "").trim().slice(0, 30) || "Participant";
     localStorage.setItem("airCanvasUserName", userName);
 
     meetingId = normalizeMeetingId(meetingIdInput?.value);
-
-    if (!meetingId) {
-        alert("Please enter the Meeting ID.");
-        return;
-    }
+    if (!meetingId) { alert("Please enter the Meeting ID."); return; }
 
     isMeetingCreator = false;
 
     try {
-        if (!isCameraStarted) {
-            await startLocalMedia();
-        }
+        if (!isCameraStarted) await startLocalMedia();
 
         meetingActive = true;
         setupMeetingUI();
 
         await connectWebSocket();
         await connectLiveKit();
-
         console.log("🎉 Joined meeting:", meetingId);
     } catch (error) {
         console.error("❌ Could not join meeting:", error);
-
         meetingActive = false;
         await cleanupMeeting(false);
         showHome();
-
-        alert(
-            "Could not join the meeting. Check the Meeting ID and browser console."
-        );
+        alert("Could not join the meeting. Check the Meeting ID and browser console.");
     }
 }
 
@@ -3430,21 +2893,13 @@ async function joinMeeting() {
 
 async function toggleMute() {
     if (!localStream) return;
-
     isMuted = !isMuted;
-
-    localStream
-        .getAudioTracks()
-        .forEach((track) => (track.enabled = !isMuted));
+    localStream.getAudioTracks().forEach((track) => (track.enabled = !isMuted));
 
     if (liveKitRoom?.localParticipant) {
-        try {
-            await liveKitRoom.localParticipant.setMicrophoneEnabled(!isMuted);
-        } catch (error) {
-            console.warn("⚠️ LiveKit microphone toggle:", error);
-        }
+        try { await liveKitRoom.localParticipant.setMicrophoneEnabled(!isMuted); }
+        catch (error) { console.warn("⚠️ LiveKit microphone toggle:", error); }
     }
-
     if (muteButton) {
         muteButton.textContent = isMuted ? "🔇 Muted" : "🎤 Mic";
         muteButton.classList.toggle("muted", isMuted);
@@ -3453,35 +2908,23 @@ async function toggleMute() {
 
 async function toggleCamera() {
     if (!localStream) return;
-
     isCameraOff = !isCameraOff;
-
-    localStream
-        .getVideoTracks()
-        .forEach((track) => (track.enabled = !isCameraOff));
+    localStream.getVideoTracks().forEach((track) => (track.enabled = !isCameraOff));
 
     if (liveKitRoom?.localParticipant) {
-        try {
-            await liveKitRoom.localParticipant.setCameraEnabled(!isCameraOff);
-        } catch (error) {
-            console.warn("⚠️ LiveKit camera toggle:", error);
-        }
+        try { await liveKitRoom.localParticipant.setCameraEnabled(!isCameraOff); }
+        catch (error) { console.warn("⚠️ LiveKit camera toggle:", error); }
     }
-
     if (cameraButton) {
-        cameraButton.textContent = isCameraOff
-            ? "🚫 Camera Off"
-            : "📹 Camera";
+        cameraButton.textContent = isCameraOff ? "🚫 Camera Off" : "📹 Camera";
         cameraButton.classList.toggle("camera-off", isCameraOff);
     }
 }
 
 async function copyMeetingIdToClipboard() {
     if (!meetingId) return;
-
     try {
         await navigator.clipboard.writeText(meetingId);
-
         if (copyMeetingId) {
             const old = copyMeetingId.textContent;
             copyMeetingId.textContent = "✅ Copied!";
@@ -3492,28 +2935,16 @@ async function copyMeetingIdToClipboard() {
     }
 }
 
-function clearCanvasButtonAction() {
-    clearMyCanvasAndBroadcast();
-}
+function clearCanvasButtonAction() { clearMyCanvasAndBroadcast(); }
 
 async function cleanupMeeting(stopCameraToo = true) {
     meetingActive = false;
 
-    // Stop any local screen share (do not broadcast — the room is
-    // being torn down).
-    try {
-        if (screenShareTrack) {
-            try {
-                screenShareTrack.stop();
-            } catch (_) {}
-        }
-    } catch (_) {}
+    try { if (screenShareTrack) screenShareTrack.stop(); } catch (_) {}
     try {
         if (screenShareStream) {
             screenShareStream.getTracks().forEach((t) => {
-                try {
-                    t.stop();
-                } catch (_) {}
+                try { t.stop(); } catch (_) {}
             });
         }
     } catch (_) {}
@@ -3524,7 +2955,6 @@ async function cleanupMeeting(stopCameraToo = true) {
 
     disconnectLiveKit();
     liveKitDataReady = false;
-
     disconnectWebSocket();
 
     clearRemoteTiles();
@@ -3549,7 +2979,6 @@ async function cleanupMeeting(stopCameraToo = true) {
 
     activeGesture = "no_gesture";
     activeConfidence = 0;
-
     resetDrawingState();
 
     updateGestureDisplay("no_gesture", 0);
@@ -3560,20 +2989,16 @@ async function cleanupMeeting(stopCameraToo = true) {
 
     if (meetingIdInput) meetingIdInput.value = "";
     if (meetingIdLarge) meetingIdLarge.textContent = "------";
-    if (meetingIdDisplay) {
-        meetingIdDisplay.textContent = "Meeting ID: ------";
-    }
+    if (meetingIdDisplay) meetingIdDisplay.textContent = "Meeting ID: ------";
 
     if (muteButton) {
         muteButton.textContent = "🎤 Mic";
         muteButton.classList.remove("muted");
     }
-
     if (cameraButton) {
         cameraButton.textContent = "📹 Camera";
         cameraButton.classList.remove("camera-off");
     }
-
     if (leaveMeetingBtn) leaveMeetingBtn.disabled = true;
 }
 
@@ -3595,12 +3020,10 @@ async function leaveMeeting() {
         homeStartCamera.textContent = "🎥 Start Camera";
         homeStartCamera.disabled = false;
     }
-
     if (startCameraBtn) {
         startCameraBtn.textContent = "Start Camera";
         startCameraBtn.disabled = false;
     }
-
     if (cameraStatus) {
         cameraStatus.textContent = "Camera is off";
         cameraStatus.style.color = "";
@@ -3628,18 +3051,10 @@ meetingIdInput?.addEventListener("keydown", (event) => {
 window.addEventListener("resize", setupCanvasSizes);
 
 window.addEventListener("beforeunload", () => {
-    try {
-        ws?.close();
-    } catch (_) {}
-    try {
-        liveKitRoom?.disconnect();
-    } catch (_) {}
-    try {
-        localStream?.getTracks().forEach((track) => track.stop());
-    } catch (_) {}
-    try {
-        screenShareTrack?.stop();
-    } catch (_) {}
+    try { ws?.close(); } catch (_) {}
+    try { liveKitRoom?.disconnect(); } catch (_) {}
+    try { localStream?.getTracks().forEach((track) => track.stop()); } catch (_) {}
+    try { screenShareTrack?.stop(); } catch (_) {}
 });
 
 // ============================================================
@@ -3661,22 +3076,14 @@ function initializeApplication() {
     updateScreenShareUI();
     setConnectionStatus("Disconnected");
 
-    if (meetingScreen) {
-        meetingScreen.classList.add("hidden");
-    }
-    if (homeScreen) {
-        homeScreen.classList.remove("hidden");
-    }
+    if (meetingScreen) meetingScreen.classList.add("hidden");
+    if (homeScreen) homeScreen.classList.remove("hidden");
 
     console.log("🚀 Air Canvas initialized.");
 }
 
 if (document.readyState === "loading") {
-    document.addEventListener(
-        "DOMContentLoaded",
-        initializeApplication,
-        { once: true }
-    );
+    document.addEventListener("DOMContentLoaded", initializeApplication, { once: true });
 } else {
     initializeApplication();
 }
