@@ -17,8 +17,8 @@ const WS_URL =
 const LIVEKIT_SERVER_URL = "wss://air-canvas-3zfbpfwj.livekit.cloud";
 const LIVEKIT_TOKEN_SERVER_ID = "aircanvas-sixxay";
 
-const MAX_PARTICIPANTS = 5;
-const MAX_GUEST_DRAWERS = 2;
+const MAX_PARTICIPANTS = 100;      // <-- was 5
+const MAX_GUEST_DRAWERS = 3;       // <-- was 2 (exactly 3 drawing slots)
 
 const PREDICTION_INTERVAL_MS = 80;
 const DRAW_SEND_INTERVAL_MS = 30;
@@ -109,6 +109,9 @@ const raisedHands = new Set();
 let isScreenSharing = false;
 let screenShareStream = null;
 let screenShareTrack = null;
+
+// ----- Pin / fullscreen state --------------------------------
+let pinnedIdentity = null;
 
 let hands = null;
 let camera = null;
@@ -262,9 +265,9 @@ function appendChatMessage(data) {
     const chatIsOpen = chatPanel && !chatPanel.classList.contains("hidden");
     if (!chatIsOpen && senderId !== String(userId)) {
         setChatUnreadCount(chatUnreadCount + 1);
-        // New: temporary toast for incoming messages.
+        // Temporary toast — now includes the actual message text.
         if (senderId) {
-            showMeetingNotification(`💬 ${senderName} sent a message`);
+            showMeetingNotification(`💬 ${senderName}: ${text}`);
         }
     }
 }
@@ -524,7 +527,9 @@ function ensureFeatureStyles() {
         }
 
         /* Remote screen share overlay.
-           Use a two-class selector so it beats .remote-video-container video. */
+           IMPORTANT: transform: none overrides the mirroring rule
+           on ".remote-video-container video" — screenshares must
+           NOT be horizontally flipped. */
         .remote-video-container .remote-screenshare-video {
             position: absolute;
             inset: 0;
@@ -534,6 +539,7 @@ function ensureFeatureStyles() {
             background: #000;
             z-index: 4;
             display: none;
+            transform: none !important;
         }
 
         .participant-list-hand {
@@ -546,6 +552,96 @@ function ensureFeatureStyles() {
         .control-button.sharing {
             background: #315fba !important;
             border-color: #4f8cff !important;
+        }
+
+        /* =====================================================
+           VIDEO CARD OVERLAY CONTROLS (Pin / Fit / Restore)
+           ===================================================== */
+        .participant-card .card-controls {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            display: flex;
+            gap: 5px;
+            z-index: 25;
+            opacity: 0;
+            transition: opacity 0.18s ease;
+            pointer-events: none;
+        }
+        .participant-card:hover .card-controls,
+        .participant-card:fullscreen .card-controls,
+        .participant-card:-webkit-full-screen .card-controls {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .card-control-btn {
+            width: 30px;
+            height: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 6px;
+            background: rgba(15, 15, 18, 0.78);
+            color: #f1f2f3;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            line-height: 1;
+            transition: background 0.15s ease, border-color 0.15s ease;
+        }
+        .card-control-btn:hover {
+            background: rgba(40, 40, 46, 0.95);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        /* Pinned layout — pinned card spans all columns */
+        .participants-grid.has-pinned {
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        }
+        .participants-grid.has-pinned .pinned-card {
+            grid-column: 1 / -1;
+            border-color: #4f8cff;
+            box-shadow: 0 0 0 1px rgba(79, 140, 255, 0.55);
+        }
+
+        /* Fullscreen card */
+        .participant-card:fullscreen,
+        .participant-card:-webkit-full-screen {
+            width: 100vw;
+            height: 100vh;
+            border-radius: 0;
+            border: 0;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            margin: 0;
+        }
+        .participant-card:fullscreen .video-container,
+        .participant-card:fullscreen .remote-video-container,
+        .participant-card:-webkit-full-screen .video-container,
+        .participant-card:-webkit-full-screen .remote-video-container {
+            width: 100%;
+            height: 100%;
+            aspect-ratio: auto;
+        }
+        .participant-card:fullscreen video,
+        .participant-card:-webkit-full-screen video {
+            object-fit: contain !important;
+        }
+        .participant-card:fullscreen .participant-label,
+        .participant-card:-webkit-full-screen .participant-label {
+            bottom: 20px;
+            left: 20px;
+            font-size: 0.9rem;
+            padding: 7px 12px;
+        }
+        .participant-card:fullscreen .card-controls,
+        .participant-card:-webkit-full-screen .card-controls {
+            top: 20px;
+            right: 20px;
         }
     `;
     document.head.appendChild(style);
@@ -696,6 +792,173 @@ function ensureExtraControls() {
 }
 
 // ============================================================
+// PIN / FIT-TO-SCREEN / CARD CONTROLS
+// ============================================================
+
+function addCardControls(card, identity) {
+    if (!card) return;
+    if (card.querySelector(".card-controls")) return;
+
+    const controls = document.createElement("div");
+    controls.className = "card-controls";
+
+    const pinBtn = document.createElement("button");
+    pinBtn.type = "button";
+    pinBtn.className = "card-control-btn pin-btn";
+    pinBtn.title = "Pin participant";
+    pinBtn.textContent = "📌";
+    pinBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        togglePin(identity);
+    });
+
+    const fitBtn = document.createElement("button");
+    fitBtn.type = "button";
+    fitBtn.className = "card-control-btn fit-btn";
+    fitBtn.title = "Fit to screen";
+    fitBtn.textContent = "⛶";
+    fitBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        toggleFullscreen(card);
+    });
+
+    const restoreBtn = document.createElement("button");
+    restoreBtn.type = "button";
+    restoreBtn.className = "card-control-btn restore-btn";
+    restoreBtn.title = "Exit fullscreen";
+    restoreBtn.textContent = "↙";
+    restoreBtn.style.display = "none";
+    restoreBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        exitFullscreen();
+    });
+
+    controls.append(pinBtn, fitBtn, restoreBtn);
+    card.appendChild(controls);
+}
+
+function togglePin(identity) {
+    const key = String(identity || "");
+    if (!key) return;
+    if (pinnedIdentity === key) {
+        unpinParticipant();
+    } else {
+        pinParticipant(key);
+    }
+}
+
+function pinParticipant(identity) {
+    pinnedIdentity = String(identity || "");
+    applyPinState();
+}
+
+function unpinParticipant() {
+    pinnedIdentity = null;
+    applyPinState();
+}
+
+function applyPinState() {
+    if (!participantsGrid) return;
+
+    const cards = participantsGrid.querySelectorAll(".participant-card");
+
+    cards.forEach((card) => {
+        card.classList.remove("pinned-card");
+        const pinBtn = card.querySelector(".pin-btn");
+        if (pinBtn) {
+            pinBtn.textContent = "📌";
+            pinBtn.title = "Pin participant";
+        }
+    });
+
+    if (!pinnedIdentity) {
+        participantsGrid.classList.remove("has-pinned");
+        return;
+    }
+
+    let pinnedCard = null;
+    cards.forEach((card) => {
+        if (String(card.dataset.identity || "") === pinnedIdentity) {
+            pinnedCard = card;
+        }
+    });
+
+    if (pinnedCard) {
+        pinnedCard.classList.add("pinned-card");
+        participantsGrid.classList.add("has-pinned");
+        const pinBtn = pinnedCard.querySelector(".pin-btn");
+        if (pinBtn) {
+            pinBtn.textContent = "📍";
+            pinBtn.title = "Unpin";
+        }
+    } else {
+        pinnedIdentity = null;
+        participantsGrid.classList.remove("has-pinned");
+    }
+}
+
+function toggleFullscreen(element) {
+    if (!element) return;
+
+    const doc = document;
+    const currentFull = doc.fullscreenElement || doc.webkitFullscreenElement;
+
+    if (currentFull === element) {
+        exitFullscreen();
+        return;
+    }
+
+    if (element.requestFullscreen) {
+        element.requestFullscreen().catch((err) => {
+            console.warn("Fullscreen request failed:", err);
+        });
+    } else if (element.webkitRequestFullscreen) {
+        element.webkitRequestFullscreen();
+    } else {
+        console.warn("Fullscreen API not supported.");
+    }
+}
+
+function exitFullscreen() {
+    const doc = document;
+    if (doc.fullscreenElement && doc.exitFullscreen) {
+        doc.exitFullscreen().catch(() => {});
+    } else if (doc.webkitFullscreenElement && doc.webkitExitFullscreen) {
+        doc.webkitExitFullscreen();
+    }
+}
+
+function handleFullscreenChange() {
+    const doc = document;
+    const fullEl = doc.fullscreenElement || doc.webkitFullscreenElement;
+
+    document.querySelectorAll(".participant-card").forEach((card) => {
+        const restoreBtn = card.querySelector(".restore-btn");
+        const fitBtn = card.querySelector(".fit-btn");
+        if (!restoreBtn || !fitBtn) return;
+        if (fullEl === card) {
+            restoreBtn.style.display = "flex";
+            fitBtn.style.display = "none";
+        } else {
+            restoreBtn.style.display = "none";
+            fitBtn.style.display = "flex";
+        }
+    });
+}
+
+function setupLocalCardControls() {
+    if (!participantsGrid) return;
+    const localCard = participantsGrid
+        .querySelector(".participant-card .video-container")
+        ?.closest(".participant-card");
+    if (!localCard) return;
+    if (!localCard.dataset.identity) {
+        localCard.dataset.identity = "local";
+    }
+    addCardControls(localCard, "local");
+}
+
+// ============================================================
 // HAND RAISE
 // ============================================================
 
@@ -791,7 +1054,6 @@ function sendReaction(emoji) {
 function isScreenShareTrack(track, publication) {
     if (!track) return false;
 
-    // Prefer publication.source when available (most reliable).
     try {
         const pubSource = publication?.source;
         if (pubSource) {
@@ -800,7 +1062,6 @@ function isScreenShareTrack(track, publication) {
         }
     } catch (_) {}
 
-    // Fall back to track.source.
     try {
         const LK = window.LivekitClient;
         if (LK?.Track?.Source?.ScreenShare &&
@@ -1322,16 +1583,14 @@ function createRemoteTile(participant) {
     remoteVid.style.visibility = "visible";
     remoteVid.style.opacity = "1";
 
-    // ----- Screen share <video> (hidden by default) -----
-    // IMPORTANT: use INLINE style so it always wins over the
-    // existing ".remote-video-container video { display: block }"
-    // CSS rule regardless of selector specificity.
+    // Screen share video (hidden by default, INLINE style wins).
     const screenVid = document.createElement("video");
     screenVid.autoplay = true;
     screenVid.playsInline = true;
     screenVid.setAttribute("playsinline", "");
     screenVid.className = "remote-screenshare-video";
     screenVid.style.display = "none";
+    screenVid.style.transform = "none";
 
     const canvas = document.createElement("canvas");
     canvas.className = "remote-drawing-canvas";
@@ -1346,7 +1605,6 @@ function createRemoteTile(participant) {
     const audio = document.createElement("audio");
     audio.autoplay = true;
 
-    // Order matters: waiting, camera video, screen video (overlay), canvas, audio
     container.append(waiting, remoteVid, screenVid, canvas, audio);
     card.append(label, container);
     participantsGrid.appendChild(card);
@@ -1367,6 +1625,9 @@ function createRemoteTile(participant) {
     };
 
     remoteParticipants.set(identity, tile);
+
+    // Card overlay controls (Pin / Fit / Restore).
+    addCardControls(card, identity);
 
     requestAnimationFrame(() => {
         resizeRemoteCanvas(tile);
@@ -1414,6 +1675,11 @@ function removeRemoteTile(identity) {
     remoteParticipants.delete(key);
     pendingRemoteDrawingHistory.delete(key);
     updateParticipantCount();
+
+    // If the removed tile was pinned, unpin.
+    if (pinnedIdentity === key) {
+        unpinParticipant();
+    }
 }
 
 function clearRemoteTiles() {
@@ -1427,7 +1693,6 @@ function attachRemoteVideo(participant, track) {
 
     try {
         track.attach(tile.video);
-        // Restore camera video if it was hidden by an earlier bug.
         tile.video.style.display = "block";
         tile.video.style.visibility = "visible";
         tile.video.style.opacity = "1";
@@ -1462,10 +1727,9 @@ function attachRemoteScreenShare(participant, track) {
     try {
         track.attach(tile.screenVideo);
         tile.screenVideo.style.display = "block";
+        tile.screenVideo.style.transform = "none";
         tile.screenTrack = track;
         tile.waiting.style.display = "none";
-        // Hide the drawing canvas while showing the screen share so
-        // the shared screen is not covered by local strokes.
         tile.canvas.style.opacity = "0";
         tile.screenVideo.play().catch(() => {});
     } catch (error) {
@@ -2497,7 +2761,6 @@ function handleWebSocketMessage(data) {
                 "Someone";
 
             showReactionBubble(senderId, emoji);
-            // Requested format: emoji on both sides.
             showMeetingNotification(`${emoji} ${name} reacted ${emoji}`);
             break;
         }
@@ -2643,7 +2906,6 @@ async function connectLiveKit() {
             if (!tile) return;
 
             if (track.kind === LK.Track.Kind.Video) {
-                // Route screenshare vs camera.
                 if (isScreenShareTrack(track, publication)) {
                     attachRemoteScreenShare(participant, track);
                 } else {
@@ -2821,6 +3083,9 @@ function setupMeetingUI() {
     updateParticipantCount();
     updateCanvasAvailability();
     renderDrawingPermissions();
+
+    // Ensure local card has pin/fit controls whenever entering a meeting.
+    setupLocalCardControls();
 }
 
 async function createMeeting() {
@@ -2953,6 +3218,13 @@ async function cleanupMeeting(stopCameraToo = true) {
     isScreenSharing = false;
     updateScreenShareUI();
 
+    // Exit fullscreen if we were in it
+    try { exitFullscreen(); } catch (_) {}
+
+    // Reset pinned state
+    pinnedIdentity = null;
+    try { applyPinState(); } catch (_) {}
+
     disconnectLiveKit();
     liveKitDataReady = false;
     disconnectWebSocket();
@@ -3050,6 +3322,9 @@ meetingIdInput?.addEventListener("keydown", (event) => {
 
 window.addEventListener("resize", setupCanvasSizes);
 
+document.addEventListener("fullscreenchange", handleFullscreenChange);
+document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+
 window.addEventListener("beforeunload", () => {
     try { ws?.close(); } catch (_) {}
     try { liveKitRoom?.disconnect(); } catch (_) {}
@@ -3075,6 +3350,9 @@ function initializeApplication() {
     updateHandRaiseButton();
     updateScreenShareUI();
     setConnectionStatus("Disconnected");
+
+    // Wire up local card pin/fit controls.
+    setupLocalCardControls();
 
     if (meetingScreen) meetingScreen.classList.add("hidden");
     if (homeScreen) homeScreen.classList.remove("hidden");
