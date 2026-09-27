@@ -2,6 +2,12 @@
 // AIR CANVAS - VIDEO MEETING
 // COMPLETE CLEAN APP.JS
 // ============================================================
+// One LiveKit media system only.
+// FastAPI handles gesture prediction + WebSocket drawing sync.
+// Maximum room size: 100 participants.
+// Host always has drawing permission; host may grant it to 2 guests.
+// Camera orientation is intentionally NOT changed here.
+// ============================================================
 
 "use strict";
 
@@ -28,6 +34,9 @@ const MAX_GUEST_DRAWERS = 2;
 const PREDICTION_INTERVAL_MS = 80;
 const DRAW_SEND_INTERVAL_MS = 30;
 const CLEAR_COOLDOWN_MS = 700;
+
+const MEDIAPIPE_PROCESS_WIDTH = 640;
+const MEDIAPIPE_PROCESS_HEIGHT = 360;
 
 // ============================================================
 // DOM
@@ -120,8 +129,8 @@ let liveKitIdentity =
 let hands = null;
 let camera = null;
 let mediaPipeStarted = false;
-// NOTE: no frame canvas anymore — we send the video element directly
-// so MediaPipe sees the true aspect ratio of the camera.
+let mediaPipeFrameCanvas = null;
+let mediaPipeFrameCtx = null;
 
 // ============================================================
 // GESTURE STATE
@@ -842,59 +851,6 @@ function resizeRemoteCanvas(tile) {
     resizeCanvasPreserve(tile.canvas, rect.width, rect.height);
 }
 
-// ============================================================
-// LANDMARK -> CANVAS PIXEL (object-fit: cover transform)
-// ============================================================
-// The local <video> uses CSS `object-fit: cover`. When the video
-// aspect ratio differs from the container aspect ratio (which is the
-// case on mobile portrait cameras), the browser scales the video up
-// and crops the overflow. MediaPipe landmarks are in the video's own
-// normalized (0..1) coordinate space, so we must apply the same
-// cover scale + centering offset before mapping to canvas pixels.
-// On desktop (video aspect == container aspect), offset = 0 and this
-// reduces to the classic `nx * canvas.width`.
-// ============================================================
-
-function getVideoCoverTransform() {
-    const container = video?.parentElement;
-    if (!container) return null;
-
-    const cw = container.clientWidth;
-    const ch = container.clientHeight;
-    const vw = video.videoWidth;
-    const vh = video.videoHeight;
-
-    if (!cw || !ch || !vw || !vh) return null;
-
-    const scale = Math.max(cw / vw, ch / vh);
-    const dispW = vw * scale;
-    const dispH = vh * scale;
-
-    return {
-        scale,
-        offsetX: (cw - dispW) / 2,
-        offsetY: (ch - dispH) / 2
-    };
-}
-
-function landmarkToCanvasPixel(nx, ny) {
-    const vw = video?.videoWidth || 0;
-    const vh = video?.videoHeight || 0;
-
-    const t = getVideoCoverTransform();
-
-    if (!t || !vw || !vh) {
-        const cw = landmarkCanvas?.width || airCanvas?.width || 1;
-        const ch = landmarkCanvas?.height || airCanvas?.height || 1;
-        return { x: nx * cw, y: ny * ch };
-    }
-
-    return {
-        x: nx * vw * t.scale + t.offsetX,
-        y: ny * vh * t.scale + t.offsetY
-    };
-}
-
 function clearCanvasElement(canvas) {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -1039,24 +995,48 @@ function flushPendingRemoteDrawingHistory(identity) {
     });
 }
 
+// ------------------------------------------------------------
+// FIXED: removeRemoteTile now ALWAYS cleans participantInfo
+// entries that match this identity — even if the tile itself
+// was never created. This prevents duplicate/stale rows in the
+// participant list and in the drawing permission panel when a
+// participant disconnects.
+// ------------------------------------------------------------
 function removeRemoteTile(identity) {
     const key = String(identity);
+
+    // 1. Always clean participantInfo entries that match.
+    for (const [infoId, info] of [...participantInfo.entries()]) {
+        const matchesKey = String(infoId) === key;
+        const matchesIdentity =
+            info.livekitIdentity &&
+            String(info.livekitIdentity) === key;
+
+        if (matchesKey || matchesIdentity) {
+            participantInfo.delete(infoId);
+        }
+    }
+
+    // 2. Remove the remote video tile if it exists.
     const tile = remoteParticipants.get(key);
-    if (!tile) return;
 
-    try {
-        tile.video.srcObject = null;
-    } catch (_) {}
-    try {
-        tile.audio.srcObject = null;
-    } catch (_) {}
+    if (tile) {
+        try {
+            tile.video.srcObject = null;
+        } catch (_) {}
+        try {
+            tile.audio.srcObject = null;
+        } catch (_) {}
 
-    if (tile.card) tile.card.remove();
+        if (tile.card) tile.card.remove();
 
-    remoteParticipants.delete(key);
-    pendingRemoteDrawingHistory.delete(key);
+        remoteParticipants.delete(key);
+        pendingRemoteDrawingHistory.delete(key);
+    }
 
+    // 3. Refresh UI counts and permission panel.
     updateParticipantCount();
+    renderDrawingPermissions();
 }
 
 function clearRemoteTiles() {
@@ -1238,23 +1218,14 @@ function stopLocalMedia() {
     isCameraStarted = false;
     mediaPipeStarted = false;
     hands = null;
+    mediaPipeFrameCanvas = null;
+    mediaPipeFrameCtx = null;
 
     if (video) video.srcObject = null;
 }
 
 // ============================================================
 // MEDIAPIPE + GESTURE PREDICTION
-// ============================================================
-// IMPORTANT: we no longer draw the video into a fixed-size
-// intermediate canvas. That intermediate canvas used to be 640x360
-// (landscape). On mobile the camera produces a portrait (or 4:3)
-// frame, which got SQUASHED into the 640x360 canvas before MediaPipe
-// ever saw it. MediaPipe then returned landmarks for the squashed
-// image, so downstream mapping was always wrong.
-//
-// We now feed the <video> element directly. MediaPipe sees the true
-// frame aspect ratio, and landmarkToCanvasPixel() applies the correct
-// object-fit:cover transform afterwards.
 // ============================================================
 
 function initMediaPipe() {
@@ -1277,16 +1248,38 @@ function initMediaPipe() {
 
         hands.onResults(onResults);
 
+        mediaPipeFrameCanvas = document.createElement("canvas");
+        mediaPipeFrameCanvas.width = MEDIAPIPE_PROCESS_WIDTH;
+        mediaPipeFrameCanvas.height = MEDIAPIPE_PROCESS_HEIGHT;
+
+        mediaPipeFrameCtx = mediaPipeFrameCanvas.getContext("2d", {
+            alpha: false,
+            desynchronized: true
+        });
+
         camera = new Camera(video, {
             onFrame: async () => {
-                if (!video.videoWidth) return;
+                if (!mediaPipeFrameCtx || !video.videoWidth) {
+                    return;
+                }
+
+                mediaPipeFrameCtx.drawImage(
+                    video,
+                    0,
+                    0,
+                    MEDIAPIPE_PROCESS_WIDTH,
+                    MEDIAPIPE_PROCESS_HEIGHT
+                );
 
                 try {
-                    await hands.send({ image: video });
+                    await hands.send({
+                        image: mediaPipeFrameCanvas
+                    });
                 } catch (error) {
                     console.warn("⚠️ MediaPipe frame error:", error);
                 }
             },
+
             width: 1280,
             height: 720
         });
@@ -1310,6 +1303,8 @@ function stopMediaPipeOnly() {
     camera = null;
     hands = null;
     mediaPipeStarted = false;
+    mediaPipeFrameCanvas = null;
+    mediaPipeFrameCtx = null;
 
     if (landmarkCanvas) {
         clearCanvasElement(landmarkCanvas);
@@ -1338,44 +1333,23 @@ function onResults(results) {
 
     const landmarks = results.multiHandLandmarks[0];
 
-    // Draw the hand skeleton using the object-fit: cover transform so
-    // landmarks align with the visible video on any aspect ratio
-    // (desktop 16:9, mobile portrait, mobile 4:3, etc.).
-    if (landmarkCanvas) {
+    if (
+        landmarkCanvas &&
+        typeof drawConnectors === "function" &&
+        typeof drawLandmarks === "function"
+    ) {
         const ctx = landmarkCanvas.getContext("2d");
 
-        if (
-            typeof HAND_CONNECTIONS !== "undefined" &&
-            Array.isArray(HAND_CONNECTIONS)
-        ) {
-            ctx.strokeStyle = "#00FF00";
-            ctx.lineWidth = 2;
-            ctx.beginPath();
+        drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {
+            color: "#00FF00",
+            lineWidth: 2
+        });
 
-            for (const [i, j] of HAND_CONNECTIONS) {
-                const p1 = landmarkToCanvasPixel(
-                    landmarks[i].x,
-                    landmarks[i].y
-                );
-                const p2 = landmarkToCanvasPixel(
-                    landmarks[j].x,
-                    landmarks[j].y
-                );
-                ctx.moveTo(p1.x, p1.y);
-                ctx.lineTo(p2.x, p2.y);
-            }
-
-            ctx.stroke();
-        }
-
-        ctx.fillStyle = "#FF0000";
-
-        for (const lm of landmarks) {
-            const p = landmarkToCanvasPixel(lm.x, lm.y);
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
-            ctx.fill();
-        }
+        drawLandmarks(ctx, landmarks, {
+            color: "#FF0000",
+            lineWidth: 1,
+            radius: 3
+        });
     }
 
     const values = [];
@@ -1498,17 +1472,15 @@ function resetDrawingState() {
 function drawGesture(values) {
     if (!airCanvas) return;
 
-    const lmX = Number(values[16]);
-    const lmY = Number(values[17]);
+    const rawX = Number(values[16]);
+    const rawY = Number(values[17]);
 
-    if (!Number.isFinite(lmX) || !Number.isFinite(lmY)) {
+    if (!Number.isFinite(rawX) || !Number.isFinite(rawY)) {
         return;
     }
 
-    const pixel = landmarkToCanvasPixel(lmX, lmY);
-
-    const targetX = clamp(pixel.x, 0, airCanvas.width);
-    const targetY = clamp(pixel.y, 0, airCanvas.height);
+    const targetX = clamp(rawX, 0, 1) * airCanvas.width;
+    const targetY = clamp(rawY, 0, 1) * airCanvas.height;
 
     const smoothing = 0.45;
 
@@ -1571,19 +1543,17 @@ function drawGesture(values) {
 function eraseGesture(values) {
     if (!airCanvas) return;
 
-    const lmX = Number(values[16]);
-    const lmY = Number(values[17]);
+    const x = clamp(Number(values[16]), 0, 1);
+    const y = clamp(Number(values[17]), 0, 1);
 
-    if (!Number.isFinite(lmX) || !Number.isFinite(lmY)) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
         return;
     }
 
-    const pixel = landmarkToCanvasPixel(lmX, lmY);
-
-    const px = clamp(pixel.x, 0, airCanvas.width);
-    const py = clamp(pixel.y, 0, airCanvas.height);
-
     const ctx = airCanvas.getContext("2d");
+
+    const px = x * airCanvas.width;
+    const py = y * airCanvas.height;
 
     ctx.globalCompositeOperation = "destination-out";
     ctx.beginPath();
@@ -1591,13 +1561,7 @@ function eraseGesture(values) {
     ctx.fill();
     ctx.globalCompositeOperation = "source-over";
 
-    sendDrawData(
-        px / airCanvas.width,
-        py / airCanvas.height,
-        px / airCanvas.width,
-        py / airCanvas.height,
-        "erase"
-    );
+    sendDrawData(x, y, x, y, "erase");
 
     resetDrawingState();
 }
@@ -2047,6 +2011,7 @@ function handleWebSocketMessage(data) {
                 const identity = userIdToLiveKitIdentity.get(id);
 
                 if (identity) removeRemoteTile(identity);
+                else removeRemoteTile(id);
 
                 userIdToLiveKitIdentity.delete(id);
                 participantInfo.delete(id);
@@ -2183,6 +2148,11 @@ function handleWebSocketMessage(data) {
                 ? data.participants
                 : [];
 
+            // Track which identities are in the fresh snapshot so
+            // we can prune anything stale.
+            const freshIds = new Set();
+            const freshIdentities = new Set();
+
             incoming.forEach((participant) => {
                 const id = participant.user_id
                     ? String(participant.user_id)
@@ -2193,6 +2163,11 @@ function handleWebSocketMessage(data) {
                 const identity = participant.livekit_identity
                     ? String(participant.livekit_identity)
                     : null;
+
+                if (id !== String(userId)) {
+                    freshIds.add(id);
+                    if (identity) freshIdentities.add(identity);
+                }
 
                 participantInfo.set(id, {
                     userId: id,
@@ -2213,6 +2188,21 @@ function handleWebSocketMessage(data) {
                         Boolean(participant.is_creator);
                 }
             });
+
+            // Prune any participantInfo entries that are not in the
+            // fresh snapshot. This prevents stale duplicates.
+            for (const [infoId, info] of [...participantInfo.entries()]) {
+                if (String(infoId) === String(userId)) continue;
+
+                const matchesFreshId = freshIds.has(String(infoId));
+                const matchesFreshIdentity =
+                    info.livekitIdentity &&
+                    freshIdentities.has(String(info.livekitIdentity));
+
+                if (!matchesFreshId && !matchesFreshIdentity) {
+                    participantInfo.delete(infoId);
+                }
+            }
 
             if (isMeetingCreator || canvasEnabled) {
                 if (!mediaPipeStarted) {
@@ -2407,6 +2397,11 @@ async function connectLiveKit() {
 
         if (identity === liveKitIdentity) return;
 
+        console.log(
+            "👤 LiveKit participant joined:",
+            participant.name || identity
+        );
+
         createRemoteTile(participant);
         upsertLiveKitParticipant(participant, false);
 
@@ -2474,6 +2469,7 @@ async function connectLiveKit() {
             name: "air-canvas-camera",
             source: LK.Track.Source.Camera
         });
+        console.log("📤 Camera published.");
     }
 
     const microphoneTrack = localStream.getAudioTracks()[0];
@@ -2483,6 +2479,7 @@ async function connectLiveKit() {
             name: "air-canvas-microphone",
             source: LK.Track.Source.Microphone
         });
+        console.log("📤 Microphone published.");
     }
 
     liveKitRoom.remoteParticipants.forEach((participant) => {
@@ -2832,11 +2829,16 @@ window.addEventListener("beforeunload", () => {
 
 function initializeApplication() {
     initializeMeetingPanels();
+
     updateLocalUI();
+
     setupCanvasSizes();
+
     hideLegacyRemoteCard();
+
     updateParticipantCount();
     updateCanvasAvailability();
+
     setConnectionStatus("Disconnected");
 
     if (meetingScreen) {
@@ -2844,6 +2846,20 @@ function initializeApplication() {
     }
     if (homeScreen) {
         homeScreen.classList.remove("hidden");
+    }
+
+    // Re-run canvas sizing whenever the local video container
+    // resizes. This handles: window resize, grid re-layout when a
+    // participant joins or leaves, and any layout shift.
+    if (
+        typeof ResizeObserver !== "undefined" &&
+        video &&
+        video.parentElement
+    ) {
+        const localCanvasResizeObserver = new ResizeObserver(() => {
+            setupCanvasSizes();
+        });
+        localCanvasResizeObserver.observe(video.parentElement);
     }
 
     console.log("🚀 Air Canvas initialized.");
