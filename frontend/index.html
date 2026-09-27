@@ -19,7 +19,6 @@
 
         <section id="homeScreen" class="screen">
 
-            <!-- Theme toggle (top-right corner) -->
             <button
                 id="themeToggleHome"
                 class="theme-toggle-btn"
@@ -47,26 +46,11 @@
                     maxlength="30"
                 >
 
-                <button
-                    id="homeStartCamera"
-                    class="primary-button"
-                >
-                    🎥 Start Camera
-                </button>
+                <button id="homeStartCamera" class="primary-button">🎥 Start Camera</button>
 
-                <div
-                    id="cameraStatus"
-                    class="camera-status"
-                >
-                    Camera is off
-                </div>
+                <div id="cameraStatus" class="camera-status">Camera is off</div>
 
-                <button
-                    id="createMeetingButton"
-                    class="primary-button"
-                >
-                    Create Meeting
-                </button>
+                <button id="createMeetingButton" class="primary-button">Create Meeting</button>
 
                 <div class="divider"><span>OR</span></div>
 
@@ -77,12 +61,7 @@
                     autocomplete="off"
                 >
 
-                <button
-                    id="joinMeetingButton"
-                    class="secondary-button"
-                >
-                    Join Meeting
-                </button>
+                <button id="joinMeetingButton" class="secondary-button">Join Meeting</button>
 
             </div>
 
@@ -93,10 +72,7 @@
              MEETING SCREEN
              ===================================================== -->
 
-        <section
-            id="meetingScreen"
-            class="screen hidden"
-        >
+        <section id="meetingScreen" class="screen hidden">
 
             <!-- ============ HEADER ============ -->
 
@@ -112,11 +88,7 @@
                     <span class="header-sep"></span>
 
                     <div class="meeting-id-chip">
-                        <span
-                            id="meetingIdDisplay"
-                            class="meeting-id-text"
-                        >Meeting ID: ------</span>
-
+                        <span id="meetingIdDisplay" class="meeting-id-text">Meeting ID: ------</span>
                         <button
                             id="copyMeetingId"
                             class="chip-icon-btn"
@@ -129,13 +101,6 @@
                 </div>
 
                 <div class="header-right">
-                    <span
-                        id="connectionStatus"
-                        class="connection-status"
-                    >
-                        Disconnected
-                    </span>
-
                     <button
                         id="themeToggleMeeting"
                         class="theme-toggle-btn"
@@ -154,68 +119,39 @@
 
                 <div class="participants-grid">
 
-                    <!-- LOCAL PARTICIPANT -->
-
                     <div class="participant-card">
-
-                        <div
-                            id="localParticipantLabel"
-                            class="participant-label"
-                        >You</div>
-
+                        <div id="localParticipantLabel" class="participant-label">You</div>
                         <div class="video-container">
-
-                            <video
-                                id="video"
-                                autoplay
-                                playsinline
-                                muted
-                            ></video>
-
+                            <video id="video" autoplay playsinline muted></video>
                             <canvas id="airCanvas"></canvas>
                             <canvas id="landmarkCanvas"></canvas>
-
                         </div>
-
                     </div>
 
-
-                    <!-- REMOTE PARTICIPANT (placeholder tile) -->
-
                     <div class="participant-card">
-
-                        <div
-                            id="remoteParticipantLabel"
-                            class="participant-label"
-                        >Participant</div>
-
+                        <div id="remoteParticipantLabel" class="participant-label">Participant</div>
                         <div class="remote-video-container">
-
-                            <div
-                                id="waitingParticipant"
-                                class="waiting-participant"
-                            >
+                            <div id="waitingParticipant" class="waiting-participant">
                                 <div class="participant-avatar">👤</div>
                                 <span>Waiting for participant...</span>
                             </div>
-
-                            <video
-                                id="remoteVideo"
-                                autoplay
-                                playsinline
-                            ></video>
-
+                            <video id="remoteVideo" autoplay playsinline></video>
                             <canvas id="remoteCanvas"></canvas>
-
                         </div>
-
                     </div>
 
                 </div>
 
 
-                <!-- FLOATING AIR CANVAS / REQUEST FAB -->
+                <!-- Pagination overlay for grid pages -->
+                <div id="paginationBar" class="pagination-bar hidden">
+                    <button id="prevPageBtn" class="pagination-btn" type="button" aria-label="Previous participants">‹</button>
+                    <span id="pageIndicator" class="pagination-indicator">1 / 1</span>
+                    <button id="nextPageBtn" class="pagination-btn" type="button" aria-label="Next participants">›</button>
+                </div>
 
+
+                <!-- FLOATING AIR CANVAS / REQUEST FAB -->
                 <button
                     id="drawToggleButton"
                     class="draw-fab fab-canvas"
@@ -229,32 +165,15 @@
 
 
                 <!-- AIR CANVAS DRAWING POPOVER -->
-
-                <div
-                    id="drawPanel"
-                    class="popover draw-popover hidden"
-                    role="dialog"
-                    aria-label="Drawing tools"
-                >
-
+                <div id="drawPanel" class="popover draw-popover hidden" role="dialog" aria-label="Drawing tools">
                     <div class="popover-header">
                         <span class="popover-title">🎨 Air Canvas</span>
-                        <button
-                            id="drawPanelClose"
-                            class="popover-close"
-                            type="button"
-                            aria-label="Close drawing tools"
-                        >×</button>
+                        <button id="drawPanelClose" class="popover-close" type="button" aria-label="Close drawing tools">×</button>
                     </div>
 
                     <div class="popover-row">
                         <span class="popover-label">Drawing</span>
-                        <button
-                            id="drawOnOff"
-                            class="switch"
-                            type="button"
-                            aria-pressed="false"
-                        >
+                        <button id="drawOnOff" class="switch" type="button" aria-pressed="false">
                             <span class="switch-dot"></span>
                             <span class="switch-text">OFF</span>
                         </button>
@@ -283,61 +202,27 @@
 
                     <div class="popover-row">
                         <span class="popover-label">Eraser size</span>
-                        <input
-                            id="eraserSizeRange"
-                            class="range"
-                            type="range"
-                            min="8"
-                            max="60"
-                            step="2"
-                            value="20"
-                            aria-label="Eraser size"
-                        >
+                        <input id="eraserSizeRange" class="range" type="range" min="8" max="60" step="2" value="20" aria-label="Eraser size">
                     </div>
 
                     <div class="popover-row popover-row-actions">
-                        <button
-                            id="drawPanelClear"
-                            class="popover-action"
-                            type="button"
-                        >🧹 Clear Canvas</button>
+                        <button id="drawPanelClear" class="popover-action" type="button">🧹 Clear Canvas</button>
                     </div>
-
                 </div>
 
 
                 <!-- DRAWING PERMISSIONS POPOVER (HOST ONLY) -->
-
-                <div
-                    id="drawingPermissionsPopover"
-                    class="popover permissions-popover hidden"
-                    role="dialog"
-                    aria-label="Drawing permissions"
-                >
+                <div id="drawingPermissionsPopover" class="popover permissions-popover hidden" role="dialog" aria-label="Drawing permissions">
                     <div class="popover-header">
                         <span class="popover-title">🎨 Drawing Permissions</span>
-                        <button
-                            id="drawingPermissionsClose"
-                            class="popover-close"
-                            type="button"
-                            aria-label="Close drawing permissions"
-                        >×</button>
+                        <button id="drawingPermissionsClose" class="popover-close" type="button" aria-label="Close drawing permissions">×</button>
                     </div>
-                    <div
-                        id="drawingPermissionsContent"
-                        class="permissions-content"
-                    ></div>
+                    <div id="drawingPermissionsContent" class="permissions-content"></div>
                 </div>
 
 
                 <!-- MORE MENU POPOVER -->
-
-                <div
-                    id="moreMenu"
-                    class="popover more-menu hidden"
-                    role="menu"
-                    aria-label="More options"
-                >
+                <div id="moreMenu" class="popover more-menu hidden" role="menu" aria-label="More options">
                     <button class="more-menu-item" type="button" data-action="clear-canvas" role="menuitem">
                         <span class="more-item-icon">🧹</span>
                         <span class="more-item-text">Clear Canvas</span>
@@ -350,7 +235,6 @@
 
 
                 <!-- SIDE PANEL: CHAT -->
-
                 <aside id="chatPanel" class="meeting-side-panel hidden" aria-label="Meeting chat">
                     <div class="side-panel-header">
                         <div>
@@ -383,7 +267,6 @@
 
 
                 <!-- SIDE PANEL: PARTICIPANTS -->
-
                 <aside id="participantsPanel" class="meeting-side-panel hidden" aria-label="Participants">
                     <div class="side-panel-header">
                         <div>
@@ -407,95 +290,49 @@
 
                 <div class="toolbar-group toolbar-center">
 
-                    <button
-                        id="muteButton"
-                        class="toolbar-btn"
-                        type="button"
-                        title="Mute / Unmute microphone"
-                    >
+                    <button id="muteButton" class="toolbar-btn" type="button" title="Mute / Unmute microphone">
                         <span class="toolbar-icon">🎤</span>
                         <span class="toolbar-label">Audio</span>
                     </button>
 
-                    <button
-                        id="cameraButton"
-                        class="toolbar-btn"
-                        type="button"
-                        title="Turn camera on / off"
-                    >
+                    <button id="cameraButton" class="toolbar-btn" type="button" title="Turn camera on / off">
                         <span class="toolbar-icon">📹</span>
                         <span class="toolbar-label">Video</span>
                     </button>
 
-                    <button
-                        id="startCamera"
-                        class="toolbar-btn hidden-control"
-                        type="button"
-                        title="Start camera"
-                    >
+                    <button id="startCamera" class="toolbar-btn hidden-control" type="button" title="Start camera">
                         <span class="toolbar-icon">📹</span>
                         <span class="toolbar-label">Start</span>
                     </button>
 
-                    <button
-                        id="screenShareButton"
-                        class="toolbar-btn"
-                        type="button"
-                        title="Share your screen"
-                    >
+                    <button id="screenShareButton" class="toolbar-btn" type="button" title="Share your screen">
                         <span class="toolbar-icon">🖥️</span>
                         <span class="toolbar-label">Share</span>
                     </button>
 
-                    <button
-                        id="reactionsButton"
-                        class="toolbar-btn"
-                        type="button"
-                        title="Reactions & Raise Hand"
-                    >
+                    <button id="reactionsButton" class="toolbar-btn" type="button" title="Reactions & Raise Hand">
                         <span class="toolbar-icon">😊</span>
                         <span class="toolbar-label">React</span>
                     </button>
 
-                    <button
-                        id="drawingPermissionsButton"
-                        class="toolbar-btn hidden-control"
-                        type="button"
-                        title="Manage drawing permissions"
-                    >
+                    <button id="drawingPermissionsButton" class="toolbar-btn hidden-control" type="button" title="Manage drawing permissions">
                         <span class="toolbar-icon">🎨</span>
                         <span class="toolbar-label">Draw Access</span>
                     </button>
 
-                    <button
-                        id="chatButton"
-                        class="toolbar-btn"
-                        type="button"
-                        title="Open chat"
-                    >
+                    <button id="chatButton" class="toolbar-btn" type="button" title="Open chat">
                         <span class="toolbar-icon">💬</span>
                         <span class="toolbar-label">Chat</span>
                         <span id="chatUnreadBadge" class="notification-badge hidden">0</span>
                     </button>
 
-                    <button
-                        id="participantsButton"
-                        class="toolbar-btn"
-                        type="button"
-                        title="Show participants"
-                    >
+                    <button id="participantsButton" class="toolbar-btn" type="button" title="Show participants">
                         <span class="toolbar-icon">👥</span>
                         <span class="toolbar-label">People</span>
                         <span id="participantCount" class="toolbar-count">1</span>
                     </button>
 
-                    <button
-                        id="moreButton"
-                        class="toolbar-btn"
-                        type="button"
-                        title="More options"
-                        aria-haspopup="menu"
-                    >
+                    <button id="moreButton" class="toolbar-btn" type="button" title="More options" aria-haspopup="menu">
                         <span class="toolbar-icon">⋯</span>
                         <span class="toolbar-label">More</span>
                     </button>
@@ -504,22 +341,12 @@
 
                 <div class="toolbar-group toolbar-right">
 
-                    <button
-                        id="endMeetingButton"
-                        class="toolbar-btn toolbar-btn-end hidden-control"
-                        type="button"
-                        title="End meeting for all participants"
-                    >
+                    <button id="endMeetingButton" class="toolbar-btn toolbar-btn-end hidden-control" type="button" title="End meeting for all participants">
                         <span class="toolbar-icon">⏹️</span>
                         <span class="toolbar-label">End</span>
                     </button>
 
-                    <button
-                        id="leaveMeeting"
-                        class="toolbar-btn toolbar-btn-leave"
-                        type="button"
-                        title="Leave meeting"
-                    >
+                    <button id="leaveMeeting" class="toolbar-btn toolbar-btn-leave" type="button" title="Leave meeting">
                         <span class="toolbar-icon">📞</span>
                         <span class="toolbar-label">Leave</span>
                     </button>
@@ -533,20 +360,13 @@
     </div>
 
 
-    <!-- REMOTE AUDIO (hidden) -->
     <audio id="remoteAudio" autoplay playsinline style="display: none;"></audio>
 
-
-    <!-- MEDIAPIPE -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
-
-    <!-- LIVEKIT -->
     <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
-
-    <!-- APPLICATION -->
     <script src="app.js"></script>
 
 </body>
