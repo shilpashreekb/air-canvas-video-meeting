@@ -420,6 +420,18 @@ function renderParticipantsList() {
     }
 }
 
+// ============================================================
+// LOCAL UI LABEL  (was missing — this is the fix)
+// ============================================================
+
+function updateLocalUI() {
+    if (localParticipantLabel) {
+        const raised = raisedHands.has(liveKitIdentity);
+        localParticipantLabel.textContent =
+            (userName || "You") + (raised ? " ✋" : "");
+    }
+}
+
 function initializeMeetingPanels() {
     if (chatButton) chatButton.addEventListener("click", openChatPanel);
     if (closeChatButton) closeChatButton.addEventListener("click", closeChatPanel);
@@ -1297,7 +1309,6 @@ function renderDrawingPermissions() {
         });
     }
 }
-
 
 // ============================================================
 // PIN / FIT-TO-SCREEN / CARD CONTROLS
@@ -3731,17 +3742,23 @@ async function leaveMeeting() {
 }
 
 // ============================================================
-// BUTTONS
+// BUTTONS  (defensive — cannot throw, logs any missing id)
 // ============================================================
 
-homeStartCamera?.addEventListener("click", startCameraFromHome);
-createMeetingButton?.addEventListener("click", createMeeting);
-joinMeetingButton?.addEventListener("click", joinMeeting);
-startCameraBtn?.addEventListener("click", startCameraFromMeeting);
-muteButton?.addEventListener("click", toggleMute);
-cameraButton?.addEventListener("click", toggleCamera);
-leaveMeetingBtn?.addEventListener("click", leaveMeeting);
-copyMeetingId?.addEventListener("click", copyMeetingIdToClipboard);
+function wireButton(id, handler) {
+    const el = document.getElementById(id);
+    if (!el) { console.warn("⚠️ Missing button:", id); return; }
+    el.addEventListener("click", handler);
+}
+
+wireButton("homeStartCamera",      startCameraFromHome);
+wireButton("createMeetingButton",  createMeeting);
+wireButton("joinMeetingButton",    joinMeeting);
+wireButton("startCamera",          startCameraFromMeeting);
+wireButton("muteButton",           toggleMute);
+wireButton("cameraButton",         toggleCamera);
+wireButton("leaveMeeting",         leaveMeeting);
+wireButton("copyMeetingId",        copyMeetingIdToClipboard);
 
 meetingIdInput?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") joinMeeting();
