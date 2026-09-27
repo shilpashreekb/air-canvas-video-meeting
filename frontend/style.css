@@ -1,37 +1,51 @@
 /* ============================================================
    AIR CANVAS MEETING
-   Clean Zoom / Microsoft Teams inspired interface
+   Modern dark video-conferencing interface
    ============================================================ */
 
-* {
+*,
+*::before,
+*::after {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
 }
 
 :root {
-    --meeting-bg: #111315;
-    --surface: #1b1d20;
-    --surface-2: #23262a;
-    --surface-3: #2c3035;
-    --border: rgba(255, 255, 255, 0.10);
-    --text: #f5f5f5;
-    --muted: #a9adb3;
+    --bg: #0e1013;
+    --surface: #16181c;
+    --surface-2: #1d2025;
+    --surface-3: #262a30;
+    --surface-4: #31363d;
+
+    --border: rgba(255, 255, 255, 0.09);
+    --border-strong: rgba(255, 255, 255, 0.18);
+
+    --text: #eef0f2;
+    --muted: #99a0a9;
+
     --accent: #4f8cff;
+    --accent-hover: #3d7cf5;
+    --accent-soft: rgba(79, 140, 255, 0.16);
+
     --danger: #d94848;
+    --danger-hover: #e25656;
+    --success: #34c07a;
+
+    --header-h: 54px;
 }
 
 html,
 body {
-    min-height: 100%;
+    height: 100%;
 }
 
 body {
-    font-family: "Segoe UI", Arial, sans-serif;
-    background: var(--meeting-bg);
+    font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+    background: var(--bg);
     color: var(--text);
-    min-height: 100vh;
     overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
 }
 
 button,
@@ -47,6 +61,10 @@ button {
     display: none !important;
 }
 
+.hidden-control {
+    display: none !important;
+}
+
 /* ============================================================
    HOME SCREEN
    ============================================================ */
@@ -56,62 +74,76 @@ button {
     justify-content: center;
     align-items: center;
     min-height: 100vh;
+    min-height: 100dvh;
     padding: 24px;
-    background: #f7f8fa;
-    color: #1f2328;
+    background:
+        radial-gradient(900px 520px at 50% -12%,
+            rgba(79, 140, 255, 0.20), transparent 62%),
+        var(--bg);
 }
 
 .home-card {
     width: 100%;
-    max-width: 430px;
-    padding: 38px;
-    background: #fff;
-    border: 1px solid #e1e4e8;
-    border-radius: 14px;
+    max-width: 420px;
+    padding: 36px 32px 28px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
     text-align: center;
-    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.10);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
 }
 
 .home-card h1 {
     margin-bottom: 8px;
-    font-size: 2.2rem;
-    color: #20242a;
-    background: none;
-    -webkit-text-fill-color: initial;
+    font-size: 1.9rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: #fff;
 }
 
 .subtitle {
-    color: #69717c;
-    margin-bottom: 28px;
-    font-size: 0.95rem;
-    line-height: 1.5;
+    color: var(--muted);
+    margin-bottom: 26px;
+    font-size: 0.9rem;
+    line-height: 1.55;
 }
 
 .home-card input {
     width: 100%;
     padding: 13px 14px;
-    margin-bottom: 14px;
-    background: #fff;
-    border: 1px solid #cfd4da;
-    border-radius: 8px;
-    color: #20242a;
+    margin-bottom: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: 9px;
+    color: var(--text);
     outline: none;
+    transition: border-color 0.15s ease,
+                box-shadow 0.15s ease,
+                background 0.15s ease;
+}
+
+.home-card input::placeholder {
+    color: #6f7680;
 }
 
 .home-card input:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.12);
+    background: var(--surface-3);
+    box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .primary-button,
 .secondary-button {
     width: 100%;
     padding: 13px 14px;
-    border-radius: 8px;
+    border-radius: 9px;
     font-weight: 600;
+    font-size: 0.94rem;
     cursor: pointer;
     margin-bottom: 10px;
-    transition: background 0.15s ease, border-color 0.15s ease;
+    transition: background 0.15s ease,
+                border-color 0.15s ease,
+                transform 0.1s ease;
 }
 
 .primary-button {
@@ -121,96 +153,110 @@ button {
 }
 
 .primary-button:hover {
-    background: #3f7df0;
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+}
+
+.primary-button:active {
+    transform: translateY(1px);
 }
 
 .primary-button:disabled {
-    opacity: 0.65;
+    opacity: 0.55;
     cursor: not-allowed;
 }
 
 .secondary-button {
-    background: #fff;
-    border: 1px solid #b9c0c8;
-    color: #20242a;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
 }
 
 .secondary-button:hover {
-    background: #f1f4f7;
+    background: var(--surface-3);
 }
 
 .camera-status {
-    margin: 9px 0 15px;
-    color: #69717c;
-    font-size: 0.9rem;
+    margin: 8px 0 16px;
+    color: var(--muted);
+    font-size: 0.85rem;
 }
 
 .divider {
     display: flex;
     align-items: center;
-    margin: 19px 0;
-    color: #8a929d;
+    margin: 18px 0;
+    color: #6f7680;
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
 }
 
 .divider::before,
 .divider::after {
     content: "";
     flex: 1;
-    border-bottom: 1px solid #e0e3e7;
+    border-bottom: 1px solid var(--border);
 }
 
 .divider span {
     padding: 0 10px;
-    font-size: 0.8rem;
 }
 
 /* ============================================================
-   MEETING SCREEN
+   MEETING SCREEN  (fits the viewport — no page scrolling)
    ============================================================ */
 
 #meetingScreen {
-    min-height: 100vh;
     display: flex;
     flex-direction: column;
-    background: var(--meeting-bg);
+    height: 100vh;
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+    background: var(--bg);
 }
 
 .header {
+    flex: 0 0 auto;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    min-height: 58px;
-    padding: 10px 18px;
-    background: #181a1d;
+    gap: 12px;
+    min-height: var(--header-h);
+    padding: 8px 16px;
+    background: var(--surface);
     border-bottom: 1px solid var(--border);
 }
 
 .header-left {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 14px;
     min-width: 0;
 }
 
 .header h1 {
-    font-size: 1.05rem;
-    font-weight: 600;
+    font-size: 1rem;
+    font-weight: 650;
+    letter-spacing: -0.01em;
     color: #fff;
-    background: none;
-    -webkit-text-fill-color: initial;
+    white-space: nowrap;
 }
 
 .meeting-id-display {
     color: var(--muted);
-    font-size: 0.82rem;
+    font-size: 0.78rem;
 }
 
 .connection-status {
-    padding: 5px 9px;
-    border-radius: 5px;
-    color: #bfc4ca;
-    font-size: 0.76rem;
-    background: #23262a;
+    flex: 0 0 auto;
+    padding: 5px 10px;
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: 0.72rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    white-space: nowrap;
 }
 
 /* ============================================================
@@ -219,83 +265,99 @@ button {
 
 .meeting-main {
     position: relative;
-    flex: 1;
+    flex: 1 1 auto;
+    min-height: 0;
     min-width: 0;
-    padding: 14px;
     width: 100%;
-    max-width: 1500px;
+    max-width: 1600px;
     margin: 0 auto;
+    padding: 10px 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow: hidden;
 }
 
 .meeting-banner {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 12px;
-    padding: 8px 10px;
-    margin-bottom: 12px;
-    background: #181a1d;
+    padding: 7px 12px;
+    background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 7px;
+    border-radius: 9px;
 }
 
 .meeting-banner span {
     color: var(--muted);
-    font-size: 0.8rem;
+    font-size: 0.76rem;
 }
 
 .meeting-banner strong {
     margin-left: auto;
-    font-size: 0.92rem;
-    letter-spacing: 1.5px;
+    font-size: 0.9rem;
+    letter-spacing: 2px;
+    font-variant-numeric: tabular-nums;
 }
 
 .copy-button {
-    background: #2a2e33;
-    border: 1px solid #3a3f45;
-    color: #e9ebee;
-    padding: 6px 10px;
-    border-radius: 5px;
+    padding: 5px 11px;
+    border-radius: 7px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: 0.74rem;
     cursor: pointer;
-    font-size: 0.78rem;
+    transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .copy-button:hover {
-    background: #353a40;
+    background: var(--surface-3);
+    border-color: var(--accent);
 }
 
 /* ============================================================
-   VIDEO GRID
+   VIDEO GRID  (absorbs remaining height)
    ============================================================ */
 
 .participants-grid {
+    flex: 1 1 auto;
+    min-height: 0;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    grid-auto-rows: minmax(150px, 1fr);
     gap: 10px;
-    margin-bottom: 12px;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .participant-card {
-    background: #191b1e;
-    border: 1px solid #2b2f34;
-    border-radius: 7px;
-    overflow: hidden;
     position: relative;
     min-width: 0;
+    min-height: 0;
+    background: #0a0b0d;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    transition: border-color 0.15s ease;
+}
+
+.participant-card:hover {
+    border-color: var(--border-strong);
 }
 
 .participant-label {
     position: absolute;
-    top: auto;
     bottom: 8px;
     left: 8px;
-    background: rgba(0, 0, 0, 0.70);
-    color: #fff;
-    padding: 5px 8px;
-    border-radius: 4px;
-    font-size: 0.78rem;
     z-index: 20;
     max-width: calc(100% - 16px);
+    padding: 4px 9px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.62);
+    color: #fff;
+    font-size: 0.75rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -303,10 +365,11 @@ button {
 
 .video-container,
 .remote-video-container {
-    position: relative;
+    position: absolute;
+    inset: 0;
     width: 100%;
-    aspect-ratio: 16 / 9;
-    background: #080909;
+    height: 100%;
+    background: #08090a;
     overflow: hidden;
 }
 
@@ -315,6 +378,7 @@ button {
     width: 100%;
     height: 100%;
     object-fit: cover;
+    display: block;
 }
 
 /* Local preview = selfie/mirror view */
@@ -322,12 +386,9 @@ button {
     transform: scaleX(-1);
 }
 
-/* Remote video MUST match the person's own selfie preview orientation.
-   (Was transform: none — that is what caused the horizontal flip
-   relative to the speaker's own preview.) */
+/* Remote video MUST match the person's own selfie preview orientation. */
 .remote-video-container video {
     transform: scaleX(-1) !important;
-    display: block;
     visibility: visible;
     opacity: 1;
 }
@@ -375,7 +436,7 @@ button {
     justify-content: center;
     color: #858b92;
     height: 100%;
-    min-height: 180px;
+    min-height: 120px;
 }
 
 .waiting-participant.hidden {
@@ -383,38 +444,8 @@ button {
 }
 
 .participant-avatar {
-    font-size: 3rem;
-    margin-bottom: 10px;
-}
-
-/* ============================================================
-   STATUS
-   ============================================================ */
-
-.status-panel {
-    display: flex;
-    justify-content: center;
-    gap: 32px;
-    margin-bottom: 12px;
-    padding: 9px 12px;
-    background: #181a1d;
-    border: 1px solid var(--border);
-    border-radius: 7px;
-}
-
-.status-panel div {
-    text-align: center;
-}
-
-.status-panel span {
-    display: block;
-    color: #8f959d;
-    font-size: 0.72rem;
-    margin-bottom: 3px;
-}
-
-.status-panel strong {
-    font-size: 0.84rem;
+    font-size: 2.6rem;
+    margin-bottom: 8px;
 }
 
 /* ============================================================
@@ -422,44 +453,63 @@ button {
    ============================================================ */
 
 .meeting-controls {
+    flex: 0 0 auto;
     display: flex;
     justify-content: center;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     flex-wrap: wrap;
-    padding: 10px 12px;
-    background: #181a1d;
-    border-top: 1px solid var(--border);
-    border-radius: 8px;
+    padding: 8px 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
 }
 
 .control-group {
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: center;
+    gap: 7px;
+    flex-wrap: wrap;
 }
 
 .control-button {
     position: relative;
-    min-width: 76px;
-    min-height: 52px;
-    padding: 7px 11px;
-    border: 1px solid #363b41;
-    border-radius: 7px;
-    background: #25282c;
-    color: #f1f2f3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 74px;
+    min-height: 50px;
+    padding: 6px 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: 9px;
+    background: var(--surface-2);
+    color: var(--text);
     cursor: pointer;
-    transition: background 0.12s ease, border-color 0.12s ease;
+    transition: background 0.14s ease,
+                border-color 0.14s ease,
+                transform 0.1s ease;
 }
 
 .control-button:hover {
-    background: #30343a;
-    border-color: #4a5057;
+    background: var(--surface-3);
+    border-color: var(--accent);
+}
+
+.control-button:active {
+    transform: translateY(1px);
 }
 
 .control-button:disabled {
     opacity: 0.45;
     cursor: not-allowed;
+}
+
+.control-button.active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: #cfe0ff;
 }
 
 .control-icon,
@@ -469,40 +519,36 @@ button {
 
 .control-icon {
     font-size: 1.05rem;
-    line-height: 1.15;
+    line-height: 1.2;
 }
 
 .control-text {
     margin-top: 3px;
     font-size: 0.68rem;
-}
-
-.hidden-control {
-    display: none !important;
-}
-
-.primary-control {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #fff;
+    font-weight: 500;
+    white-space: nowrap;
 }
 
 .leave-button {
-    min-width: 82px;
-    background: #b93636;
-    border-color: #b93636;
+    min-width: 84px;
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
 }
 
 .leave-button:hover {
-    background: #d04444;
+    background: var(--danger-hover);
+    border-color: var(--danger-hover);
 }
 
 .muted {
-    background: #7b3d3d !important;
+    background: #5a2b2b !important;
+    border-color: #7b3d3d !important;
 }
 
 .camera-off {
-    background: #7b3d3d !important;
+    background: #5a2b2b !important;
+    border-color: #7b3d3d !important;
 }
 
 .toolbar-count {
@@ -512,7 +558,7 @@ button {
     min-width: 16px;
     padding: 1px 4px;
     border-radius: 8px;
-    background: #4f8cff;
+    background: var(--accent);
     color: #fff;
     font-size: 0.62rem;
     line-height: 1.3;
@@ -532,21 +578,209 @@ button {
 }
 
 /* ============================================================
+   DRAWING TOOLS PANEL
+   ============================================================ */
+
+.draw-panel {
+    position: fixed;
+    left: 50%;
+    bottom: 96px;
+    transform: translateX(-50%);
+    z-index: 9500;
+    width: min(330px, calc(100vw - 24px));
+    padding: 12px 14px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+    background: rgba(22, 24, 28, 0.97);
+    border: 1px solid var(--border-strong);
+    border-radius: 14px;
+    box-shadow: 0 20px 55px rgba(0, 0, 0, 0.62);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+    animation: drawPanelIn 0.16s ease-out;
+}
+
+@keyframes drawPanelIn {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}
+
+.draw-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.draw-panel-title {
+    font-size: 0.84rem;
+    font-weight: 650;
+}
+
+.draw-panel-close {
+    width: 26px;
+    height: 26px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 1.2rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.14s ease, color 0.14s ease;
+}
+
+.draw-panel-close:hover {
+    background: var(--surface-3);
+    color: var(--text);
+}
+
+.draw-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.draw-label {
+    font-size: 0.76rem;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.draw-switch {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-width: 76px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface-2);
+    color: var(--muted);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    cursor: pointer;
+    transition: background 0.15s ease,
+                border-color 0.15s ease,
+                color 0.15s ease;
+}
+
+.draw-switch-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #5c636c;
+    transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.draw-switch.on {
+    background: rgba(52, 192, 122, 0.16);
+    border-color: var(--success);
+    color: #7ee2ac;
+}
+
+.draw-switch.on .draw-switch-dot {
+    background: var(--success);
+    box-shadow: 0 0 0 3px rgba(52, 192, 122, 0.22);
+}
+
+.color-swatches {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+.color-swatch {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 2px solid transparent;
+    border-radius: 50%;
+    background: var(--swatch, #00ff00);
+    cursor: pointer;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+    transition: transform 0.12s ease,
+                border-color 0.12s ease,
+                box-shadow 0.12s ease;
+}
+
+.color-swatch:hover {
+    transform: scale(1.12);
+}
+
+.color-swatch.active {
+    border-color: var(--accent);
+    transform: scale(1.14);
+    box-shadow: 0 0 0 2px rgba(79, 140, 255, 0.35);
+}
+
+.size-options {
+    display: flex;
+    gap: 6px;
+}
+
+.size-option {
+    min-width: 38px;
+    padding: 5px 10px;
+    border-radius: 7px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface-2);
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.14s ease,
+                border-color 0.14s ease,
+                color 0.14s ease;
+}
+
+.size-option:hover {
+    background: var(--surface-3);
+    color: var(--text);
+}
+
+.size-option.active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: #cfe0ff;
+}
+
+.draw-range {
+    flex: 1;
+    max-width: 150px;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+/* ============================================================
    SIDE PANELS
    ============================================================ */
 
 .meeting-side-panel {
     position: fixed;
-    top: 58px;
+    top: var(--header-h);
     right: 0;
     bottom: 0;
-    z-index: 100;
+    z-index: 9200;
     width: min(360px, 92vw);
     display: flex;
     flex-direction: column;
-    background: #1b1d20;
-    border-left: 1px solid #34383e;
-    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.30);
+    background: var(--surface);
+    border-left: 1px solid var(--border-strong);
+    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.35);
 }
 
 .side-panel-header {
@@ -555,7 +789,7 @@ button {
     justify-content: space-between;
     gap: 12px;
     padding: 15px 16px;
-    border-bottom: 1px solid #34383e;
+    border-bottom: 1px solid var(--border);
 }
 
 .side-panel-header strong {
@@ -567,7 +801,7 @@ button {
 .side-panel-subtitle {
     display: block;
     margin-top: 3px;
-    color: #9298a0;
+    color: var(--muted);
     font-size: 0.72rem;
 }
 
@@ -575,15 +809,18 @@ button {
     width: 30px;
     height: 30px;
     border: 0;
-    border-radius: 5px;
+    border-radius: 6px;
     background: transparent;
-    color: #cdd1d6;
+    color: var(--muted);
     font-size: 1.35rem;
+    line-height: 1;
     cursor: pointer;
+    transition: background 0.14s ease, color 0.14s ease;
 }
 
 .side-panel-close:hover {
-    background: #2c3035;
+    background: var(--surface-3);
+    color: var(--text);
 }
 
 /* ============================================================
@@ -603,7 +840,7 @@ button {
     justify-content: center;
     min-height: 220px;
     text-align: center;
-    color: #a0a6ad;
+    color: var(--muted);
     font-size: 0.85rem;
 }
 
@@ -645,7 +882,7 @@ button {
     display: inline-block;
     max-width: 90%;
     padding: 8px 10px;
-    background: #2a2e33;
+    background: var(--surface-3);
     border-radius: 7px;
     color: #eef0f2;
     font-size: 0.82rem;
@@ -661,19 +898,23 @@ button {
     display: flex;
     gap: 8px;
     padding: 11px;
-    border-top: 1px solid #34383e;
-    background: #181a1d;
+    border-top: 1px solid var(--border);
+    background: var(--surface-2);
 }
 
 .chat-composer input {
     flex: 1;
     min-width: 0;
     padding: 9px 10px;
-    border: 1px solid #3a3f45;
-    border-radius: 6px;
+    border: 1px solid var(--border-strong);
+    border-radius: 7px;
     outline: none;
-    background: #25282c;
-    color: #f2f3f4;
+    background: var(--surface-3);
+    color: var(--text);
+}
+
+.chat-composer input::placeholder {
+    color: #6f7680;
 }
 
 .chat-composer input:focus {
@@ -683,10 +924,14 @@ button {
 .chat-composer button {
     width: 40px;
     border: 0;
-    border-radius: 6px;
+    border-radius: 7px;
     background: var(--accent);
     color: #fff;
     cursor: pointer;
+}
+
+.chat-composer button:hover {
+    background: var(--accent-hover);
 }
 
 /* ============================================================
@@ -714,7 +959,7 @@ button {
     place-items: center;
     flex: 0 0 32px;
     border-radius: 50%;
-    background: #343940;
+    background: var(--surface-4);
     color: #fff;
     font-size: 0.8rem;
     font-weight: 600;
@@ -745,47 +990,100 @@ button {
     font-size: 0.66rem;
 }
 
-/* Host drawing permissions panel styling */
+/* Host drawing permissions panel */
 #drawingPermissionsPanel {
-    background: #1b1d20 !important;
-    border: 1px solid #34383e !important;
-    border-radius: 7px !important;
-    color: #e8eaec;
+    flex: 0 0 auto;
+    max-height: 34vh;
+    overflow-y: auto;
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 10px !important;
+    color: var(--text);
 }
 
 #drawingPermissionsPanel button {
-    background: #2c3035;
-    color: #f2f3f4;
-    border: 1px solid #41464d;
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    border-radius: 7px;
+    cursor: pointer;
 }
 
 #drawingPermissionsPanel button:hover {
-    background: #373c42;
+    background: var(--surface-3);
 }
 
 #drawingPermissionsPanel button:disabled {
     opacity: 0.45;
+    cursor: not-allowed;
 }
 
 /* ============================================================
    RESPONSIVE
    ============================================================ */
 
-@media (max-width: 850px) {
-    .header-left {
-        gap: 9px;
+@media (max-width: 900px) {
+    .participants-grid {
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+
+    .control-button {
+        min-width: 64px;
+        min-height: 46px;
+        padding: 5px 8px;
+    }
+
+    .control-icon {
+        font-size: 0.98rem;
+    }
+
+    .control-text {
+        font-size: 0.62rem;
+    }
+
+    .leave-button {
+        min-width: 74px;
+    }
+}
+
+@media (max-width: 620px) {
+    :root {
+        --header-h: 50px;
+    }
+
+    .header {
+        padding: 6px 12px;
     }
 
     .meeting-id-display {
         display: none;
     }
 
+    .connection-status {
+        padding: 4px 8px;
+        font-size: 0.66rem;
+    }
+
+    .meeting-main {
+        padding: 8px;
+        gap: 8px;
+    }
+
+    .meeting-banner {
+        font-size: 0.78rem;
+        padding: 6px 10px;
+    }
+
     .participants-grid {
         grid-template-columns: 1fr;
+        grid-auto-rows: minmax(120px, 1fr);
+        gap: 8px;
     }
 
     .meeting-controls {
-        gap: 7px;
+        gap: 6px;
+        padding: 7px 8px;
+        border-radius: 10px;
     }
 
     .control-group {
@@ -793,26 +1091,33 @@ button {
     }
 
     .control-button {
-        min-width: 64px;
-        min-height: 48px;
-        padding: 6px 8px;
-    }
-}
-
-@media (max-width: 560px) {
-    .meeting-main {
-        padding: 8px;
+        min-width: 56px;
+        min-height: 42px;
+        padding: 4px 6px;
+        border-radius: 8px;
     }
 
-    .meeting-banner {
-        font-size: 0.78rem;
-    }
-
-    .status-panel {
-        gap: 20px;
+    .control-icon {
+        font-size: 0.92rem;
     }
 
     .control-text {
-        font-size: 0.61rem;
+        margin-top: 2px;
+        font-size: 0.56rem;
+    }
+
+    .leave-button {
+        min-width: 64px;
+    }
+
+    .draw-panel {
+        bottom: 84px;
+        padding: 10px 12px 12px;
+        gap: 9px;
+    }
+
+    .color-swatch {
+        width: 22px;
+        height: 22px;
     }
 }
