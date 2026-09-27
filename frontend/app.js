@@ -150,7 +150,7 @@ let lastSentDrawX = null;
 let lastSentDrawY = null;
 
 // Every draw_data message this client has successfully emitted.
-// Replayed to participants who join later (FIX 2).
+// Replayed to participants who join later (late-join sync).
 let localDrawingHistory = [];
 
 // ============================================================
@@ -482,15 +482,21 @@ function initializeMeetingPanels() {
     updateParticipantCount();
 }
 
+// ------------------------------------------------------------
+// BUG 2 FIX: Clear stays available even when the participant
+// no longer has drawing permission, as long as they still have
+// strokes on their own canvas (localDrawingHistory is non-empty).
+// ------------------------------------------------------------
 function updateCanvasAvailability() {
     const canDraw = isMeetingCreator || canvasEnabled;
+    const canClear = canDraw || localDrawingHistory.length > 0;
 
     if (clearCanvasBtn) {
-        clearCanvasBtn.disabled = !canDraw;
-        clearCanvasBtn.style.opacity = canDraw ? "1" : "0.45";
-        clearCanvasBtn.title = canDraw
+        clearCanvasBtn.disabled = !canClear;
+        clearCanvasBtn.style.opacity = canClear ? "1" : "0.45";
+        clearCanvasBtn.title = canClear
             ? "Clear your canvas"
-            : "The host has not given you drawing permission.";
+            : "You have nothing to clear.";
     }
 
     if (gestureDisplay && !canDraw) {
@@ -849,7 +855,7 @@ function clearLocalCanvas() {
     lastDrawY = 0;
     lastSentDrawX = null;
     lastSentDrawY = null;
-    // FIX 2: wipe the recorded history too — the canvas is empty.
+    // Wipe the recorded history too — the canvas is empty.
     localDrawingHistory = [];
 }
 
@@ -1237,6 +1243,13 @@ function initMediaPipe() {
     }
 }
 
+// ------------------------------------------------------------
+// BUG 1 FIX: MediaPipe's Camera.stop() can pause the <video>
+// element that holds our local stream. We stop MediaPipe as
+// before, then explicitly resume the local preview so the
+// participant's own tile never goes black just because drawing
+// permission was revoked.
+// ------------------------------------------------------------
 function stopMediaPipeOnly() {
     if (camera) {
         try {
@@ -1253,6 +1266,18 @@ function stopMediaPipeOnly() {
     }
 
     resetDrawingState();
+
+    const restoreLocalPreview = () => {
+        if (video && video.srcObject && video.paused) {
+            video.play().catch(() => {});
+        }
+    };
+
+    // Run immediately and once more after a tick, in case
+    // MediaPipe's stop() is async internally.
+    restoreLocalPreview();
+    setTimeout(restoreLocalPreview, 0);
+    setTimeout(restoreLocalPreview, 120);
 }
 
 function onResults(results) {
@@ -1615,7 +1640,7 @@ function sendDrawData(x, y, prevX, prevY, action) {
     let prevLocalX = clamp(Number(prevX), 0, 1);
     let prevLocalY = Number(prevY);
 
-    // FIX 1: For "draw", always connect to the last position we ACTUALLY
+    // For "draw", always connect to the last position we ACTUALLY
     // sent. If we used the caller's prevX (which advances every local
     // frame even when this function early-returns), throttled frames
     // would leave visible gaps on remote canvases.
@@ -1652,13 +1677,25 @@ function sendDrawData(x, y, prevX, prevY, action) {
 
     sendWS(message);
 
-    // FIX 2: keep this event so late-joining participants can replay
-    // the same stroke.
+    // Keep this event so late-joining participants can replay the
+    // same stroke.
     localDrawingHistory.push(message);
 }
 
+// ------------------------------------------------------------
+// BUG 2 FIX: allow clearing even when drawing permission has been
+// revoked, as long as the participant still has strokes on their
+// own canvas (localDrawingHistory non-empty). This does NOT grant
+// drawing permission — it only lets them clean up what they already
+// drew.
+// ------------------------------------------------------------
 function clearMyCanvasAndBroadcast() {
-    if (!isMeetingCreator && !canvasEnabled) {
+    const canClear =
+        isMeetingCreator ||
+        canvasEnabled ||
+        localDrawingHistory.length > 0;
+
+    if (!canClear) {
         return;
     }
 
@@ -1678,7 +1715,7 @@ function clearMyCanvasAndBroadcast() {
 }
 
 // ============================================================
-// LATE-JOIN DRAWING SYNC (FIX 2)
+// LATE-JOIN DRAWING SYNC
 // Sends this client's current drawing history to one specific
 // newly-joined participant so they see everything that was drawn
 // before they arrived.
@@ -2059,10 +2096,14 @@ function handleWebSocketMessage(data) {
 
                 userIdToLiveKitIdentity.delete(id);
                 participantInfo.delete(id);
+                drawingPermissionRequests.delete(id);
             }
 
             if (data.livekit_identity) {
-                removeRemoteTile(String(data.livekit_identity));
+                const identity = String(data.livekit_identity);
+                removeRemoteTile(identity);
+                participantInfo.delete(identity);
+                drawingPermissionRequests.delete(identity);
             }
 
             updateParticipantCount();
@@ -2140,10 +2181,15 @@ function handleWebSocketMessage(data) {
                         initMediaPipe();
                     }
                 } else {
-                    stopMediaPipeOnly();
+                    // Do NOT stop MediaPipe on revoke — the guard in
+                    // onResults already blocks drawing. Keeping the
+                    // pipeline alive avoids pausing the local <video>.
+                    if (landmarkCanvas) {
+                        clearCanvasElement(landmarkCanvas);
+                    }
+                    resetDrawingState();
                 }
 
-                resetDrawingState();
                 updateCanvasAvailability();
             } else {
                 renderDrawingPermissions();
@@ -2201,8 +2247,17 @@ function handleWebSocketMessage(data) {
                 id === String(liveKitIdentity)
             ) {
                 canvasEnabled = false;
-                stopMediaPipeOnly();
+
+                // BUG 1 FIX: do NOT stop MediaPipe here. Its Camera.stop()
+                // would pause the local <video> element and blacken the
+                // participant's own tile. The guard in onResults already
+                // prevents drawing when canvasEnabled is false, so we only
+                // clear the landmark overlay and reset stroke state.
+                if (landmarkCanvas) {
+                    clearCanvasElement(landmarkCanvas);
+                }
                 resetDrawingState();
+
                 updateCanvasAvailability();
             } else {
                 renderDrawingPermissions();
@@ -2255,8 +2310,6 @@ function handleWebSocketMessage(data) {
                 if (!mediaPipeStarted) {
                     initMediaPipe();
                 }
-            } else {
-                stopMediaPipeOnly();
             }
 
             updateCanvasAvailability();
@@ -2457,7 +2510,7 @@ async function connectLiveKit() {
             { reliable: true, topic: "aircanvas-control" }
         );
 
-        // FIX 2: push our existing drawing to the newly-joined peer.
+        // Push our existing drawing to the newly-joined peer.
         sendDrawingHistoryTo(identity);
 
         for (const [id, info] of participantInfo) {
@@ -2469,15 +2522,30 @@ async function connectLiveKit() {
         }
     });
 
+    // ------------------------------------------------------------
+    // BUG 3 FIX: also clean up the participant's permission entry
+    // and pending state when they disconnect, then re-render the
+    // host's Drawing Permissions panel so a departed guest does not
+    // linger with a stale "Give Drawing" button.
+    // ------------------------------------------------------------
     liveKitRoom.on(LK.RoomEvent.ParticipantDisconnected, (participant) => {
         const identity = String(participant.identity);
+
         removeRemoteTile(identity);
+
+        participantInfo.delete(identity);
+        drawingPermissionRequests.delete(identity);
 
         const id = liveKitIdentityToUserId.get(identity);
         if (id) {
             liveKitIdentityToUserId.delete(identity);
             userIdToLiveKitIdentity.delete(id);
+            participantInfo.delete(id);
+            drawingPermissionRequests.delete(id);
         }
+
+        updateParticipantCount();
+        renderDrawingPermissions();
     });
 
     await liveKitRoom.connect(
