@@ -1627,13 +1627,21 @@ function drawDot(canvas, x, y, action = "draw") {
     ctx.globalCompositeOperation = "source-over";
 }
 
+// ------------------------------------------------------------
+// FIX: Do NOT mirror X before transmitting.
+// The local drawing is authored in the raw (unmirrored) camera
+// frame. The remote video and remote canvas are also unmirrored.
+// Therefore the coordinates must be transmitted as-is. Applying
+// `1 - x` here caused the remote drawing to appear horizontally
+// flipped.
+// ------------------------------------------------------------
 function sendDrawData(x, y, prevX, prevY, action) {
     if (!isMeetingCreator && !canvasEnabled) {
         return;
     }
 
-    const remoteX = 1 - clamp(Number(x), 0, 1);
-    const remotePrevX = 1 - clamp(Number(prevX), 0, 1);
+    const remoteX = clamp(Number(x), 0, 1);
+    const remotePrevX = clamp(Number(prevX), 0, 1);
 
     if (!meetingActive || !liveKitConnected) {
         return;
