@@ -198,15 +198,16 @@
 
 
                 <!-- ==========================================
-                     FLOATING AIR CANVAS BUTTON (bottom-right)
+                     FLOATING AIR CANVAS / REQUEST FAB
+                     (bottom-right of the video area)
                      ========================================== -->
 
                 <button
                     id="drawToggleButton"
-                    class="draw-fab hidden-control"
+                    class="draw-fab fab-canvas"
                     type="button"
                     title="Air Canvas"
-                    aria-label="Open Air Canvas drawing tools"
+                    aria-label="Air Canvas"
                     aria-haspopup="dialog"
                 >
                     <span class="draw-fab-icon">🎨</span>
@@ -252,8 +253,8 @@
                         <div class="color-swatches" id="colorSwatches">
                             <button class="color-swatch" type="button" data-color="#00ff00" style="--swatch:#00ff00" aria-label="Green"></button>
                             <button class="color-swatch" type="button" data-color="#ff3b3b" style="--swatch:#ff3b3b" aria-label="Red"></button>
-                            <button class="color-swatch" type="button" data-color="#4f8cff" style="--swatch:#4f8cff" aria-label="Blue"></button>
-                            <button class="color-swatch" type="button" data-color="#ffd93b" style="--swatch:#ffd93b" aria-label="Yellow"></button>
+                            <button class="color-swatch" type="button" data-color="#2563eb" style="--swatch:#2563eb" aria-label="Blue"></button>
+                            <button class="color-swatch" type="button" data-color="#f59e0b" style="--swatch:#f59e0b" aria-label="Yellow"></button>
                             <button class="color-swatch" type="button" data-color="#ffffff" style="--swatch:#ffffff" aria-label="White"></button>
                             <button class="color-swatch" type="button" data-color="#111111" style="--swatch:#111111" aria-label="Black"></button>
                         </div>
@@ -266,19 +267,6 @@
                             <button class="size-option" type="button" data-size="4">M</button>
                             <button class="size-option" type="button" data-size="8">L</button>
                         </div>
-                    </div>
-
-                    <div class="popover-row">
-                        <span class="popover-label">Eraser</span>
-                        <button
-                            id="eraserToggle"
-                            class="switch"
-                            type="button"
-                            aria-pressed="false"
-                        >
-                            <span class="switch-dot"></span>
-                            <span class="switch-text">OFF</span>
-                        </button>
                     </div>
 
                     <div class="popover-row">
@@ -307,6 +295,32 @@
 
 
                 <!-- ==========================================
+                     DRAWING PERMISSIONS POPOVER (HOST ONLY)
+                     ========================================== -->
+
+                <div
+                    id="drawingPermissionsPopover"
+                    class="popover permissions-popover hidden"
+                    role="dialog"
+                    aria-label="Drawing permissions"
+                >
+                    <div class="popover-header">
+                        <span class="popover-title">🎨 Drawing Permissions</span>
+                        <button
+                            id="drawingPermissionsClose"
+                            class="popover-close"
+                            type="button"
+                            aria-label="Close drawing permissions"
+                        >×</button>
+                    </div>
+                    <div
+                        id="drawingPermissionsContent"
+                        class="permissions-content"
+                    ></div>
+                </div>
+
+
+                <!-- ==========================================
                      MORE MENU POPOVER
                      ========================================== -->
 
@@ -323,17 +337,6 @@
                     <button class="more-menu-item" type="button" data-action="copy-id" role="menuitem">
                         <span class="more-item-icon">📋</span>
                         <span class="more-item-text">Copy Meeting ID</span>
-                    </button>
-                    <div class="more-menu-sep"></div>
-                    <button class="more-menu-item" type="button" data-action="captions" role="menuitem">
-                        <span class="more-item-icon">💬</span>
-                        <span class="more-item-text">Captions</span>
-                        <span class="more-item-hint">Coming soon</span>
-                    </button>
-                    <button class="more-menu-item" type="button" data-action="settings" role="menuitem">
-                        <span class="more-item-icon">⚙️</span>
-                        <span class="more-item-text">Settings</span>
-                        <span class="more-item-hint">Coming soon</span>
                     </button>
                 </div>
 
@@ -389,7 +392,7 @@
 
 
             <!-- =====================================================
-                 BOTTOM TOOLBAR (Zoom-style)
+                 BOTTOM TOOLBAR
                  ===================================================== -->
 
             <footer class="meeting-toolbar">
@@ -442,20 +445,20 @@
                         id="reactionsButton"
                         class="toolbar-btn"
                         type="button"
-                        title="Send a reaction"
+                        title="Reactions & Raise Hand"
                     >
                         <span class="toolbar-icon">😊</span>
                         <span class="toolbar-label">React</span>
                     </button>
 
                     <button
-                        id="handRaiseButton"
-                        class="toolbar-btn"
+                        id="drawingPermissionsButton"
+                        class="toolbar-btn hidden-control"
                         type="button"
-                        title="Raise / lower your hand"
+                        title="Manage drawing permissions"
                     >
-                        <span class="toolbar-icon">✋</span>
-                        <span class="toolbar-label">Hand</span>
+                        <span class="toolbar-icon">🎨</span>
+                        <span class="toolbar-label">Draw Access</span>
                     </button>
 
                     <button

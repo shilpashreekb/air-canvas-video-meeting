@@ -1,5 +1,5 @@
 /* ============================================================
-   AIR CANVAS MEETING — Professional dark meeting UI
+   AIR CANVAS MEETING — Professional light-blue / white theme
    ============================================================ */
 
 *,
@@ -12,40 +12,43 @@
 
 :root {
     /* surfaces */
-    --bg:              #0f1114;
-    --surface:         #1a1c20;
-    --surface-2:       #212429;
-    --surface-3:       #2a2e34;
-    --surface-4:       #343840;
+    --bg:            #eff3f9;
+    --surface:       #ffffff;
+    --surface-2:     #f5f8fc;
+    --surface-3:     #e8eef7;
+    --surface-4:     #d8e3f0;
 
     /* borders */
-    --border:          rgba(255, 255, 255, 0.07);
-    --border-strong:   rgba(255, 255, 255, 0.14);
+    --border:        #e1e7ef;
+    --border-strong: #cbd5e0;
 
     /* text */
-    --text:            #eceef1;
-    --text-muted:      #9ba1aa;
-    --text-dim:        #6b7178;
+    --text:          #1a2430;
+    --text-muted:    #5c6b7c;
+    --text-dim:      #8b98a8;
 
     /* accent */
-    --accent:          #4f8cff;
-    --accent-hover:    #3f7df0;
-    --accent-soft:     rgba(79, 140, 255, 0.15);
+    --accent:        #2563eb;
+    --accent-hover:  #1d4ed8;
+    --accent-soft:   #dbeafe;
+    --accent-light:  #eff6ff;
 
     /* states */
-    --danger:          #d94848;
-    --danger-hover:    #e25656;
-    --success:         #34c07a;
+    --danger:        #dc2626;
+    --danger-hover:  #b91c1c;
+    --danger-soft:   #fee2e2;
+    --success:       #16a34a;
+    --success-soft:  #dcfce7;
+
+    /* video tile background */
+    --video-bg:      #0f1419;
 
     /* layout */
-    --header-h:        52px;
-    --toolbar-h:       68px;
+    --header-h:      54px;
+    --toolbar-h:     70px;
 }
 
-html,
-body {
-    height: 100%;
-}
+html, body { height: 100%; }
 
 body {
     font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
@@ -55,22 +58,11 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
-button,
-input {
-    font: inherit;
-}
+button, input { font: inherit; }
+button { -webkit-tap-highlight-color: transparent; }
 
-button {
-    -webkit-tap-highlight-color: transparent;
-}
-
-.hidden {
-    display: none !important;
-}
-
-.hidden-control {
-    display: none !important;
-}
+.hidden { display: none !important; }
+.hidden-control { display: none !important; }
 
 
 /* ============================================================
@@ -85,8 +77,8 @@ button {
     min-height: 100dvh;
     padding: 24px;
     background:
-        radial-gradient(900px 520px at 50% -12%,
-            rgba(79, 140, 255, 0.14), transparent 62%),
+        radial-gradient(900px 480px at 50% -10%,
+            rgba(37, 99, 235, 0.10), transparent 65%),
         var(--bg);
 }
 
@@ -98,7 +90,7 @@ button {
     border: 1px solid var(--border);
     border-radius: 16px;
     text-align: center;
-    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+    box-shadow: 0 18px 50px rgba(15, 40, 90, 0.10);
 }
 
 .home-brand {
@@ -109,15 +101,13 @@ button {
     margin-bottom: 6px;
 }
 
-.home-brand-mark {
-    font-size: 1.9rem;
-}
+.home-brand-mark { font-size: 1.9rem; }
 
 .home-card h1 {
     font-size: 1.6rem;
     font-weight: 700;
     letter-spacing: -0.02em;
-    color: #fff;
+    color: var(--text);
 }
 
 .subtitle {
@@ -141,13 +131,11 @@ button {
                 background 0.15s ease;
 }
 
-.home-card input::placeholder {
-    color: var(--text-dim);
-}
+.home-card input::placeholder { color: var(--text-dim); }
 
 .home-card input:focus {
     border-color: var(--accent);
-    background: var(--surface-3);
+    background: var(--surface);
     box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
@@ -170,18 +158,16 @@ button {
     border: 1px solid var(--accent);
     color: #fff;
 }
-
 .primary-button:hover   { background: var(--accent-hover); border-color: var(--accent-hover); }
 .primary-button:active  { transform: translateY(1px); }
 .primary-button:disabled{ opacity: 0.55; cursor: not-allowed; }
 
 .secondary-button {
-    background: var(--surface-2);
+    background: var(--surface);
     border: 1px solid var(--border-strong);
     color: var(--text);
 }
-
-.secondary-button:hover { background: var(--surface-3); }
+.secondary-button:hover { background: var(--surface-2); }
 
 .camera-status {
     margin: 8px 0 16px;
@@ -209,7 +195,7 @@ button {
 
 
 /* ============================================================
-   MEETING SCREEN  (fits viewport, video dominates)
+   MEETING SCREEN
    ============================================================ */
 
 #meetingScreen {
@@ -249,9 +235,9 @@ button {
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    color: #fff;
+    color: var(--text);
     font-size: 0.9rem;
-    font-weight: 650;
+    font-weight: 700;
     letter-spacing: -0.01em;
     white-space: nowrap;
 }
@@ -297,7 +283,6 @@ button {
     font-size: 0.85rem;
     transition: background 0.14s ease, color 0.14s ease;
 }
-
 .chip-icon-btn:hover {
     background: var(--surface-3);
     color: var(--text);
@@ -343,14 +328,13 @@ button {
     position: relative;
     min-width: 0;
     min-height: 0;
-    background: #0a0b0d;
+    background: var(--video-bg);
     border: 1px solid var(--border);
     border-radius: 10px;
     overflow: hidden;
     transition: border-color 0.15s ease;
 }
-
-.participant-card:hover { border-color: var(--border-strong); }
+.participant-card:hover { border-color: var(--accent); }
 
 .participant-label {
     position: absolute;
@@ -360,7 +344,7 @@ button {
     max-width: calc(100% - 16px);
     padding: 4px 9px;
     border-radius: 6px;
-    background: rgba(0, 0, 0, 0.62);
+    background: rgba(15, 20, 25, 0.72);
     color: #fff;
     font-size: 0.74rem;
     white-space: nowrap;
@@ -374,7 +358,7 @@ button {
     inset: 0;
     width: 100%;
     height: 100%;
-    background: #08090a;
+    background: var(--video-bg);
     overflow: hidden;
 }
 
@@ -391,14 +375,14 @@ button {
     transform: scaleX(-1);
 }
 
-/* Remote video: match the speaker's selfie orientation (UNCHANGED) */
+/* Remote video: match speaker's selfie orientation (UNCHANGED) */
 .remote-video-container video {
     transform: scaleX(-1) !important;
     visibility: visible;
     opacity: 1;
 }
 
-/* Local canvases mirrored with the video (UNCHANGED) */
+/* Local canvases mirrored with video (UNCHANGED) */
 .video-container canvas {
     position: absolute;
     top: 0;
@@ -412,7 +396,7 @@ button {
 #airCanvas      { z-index: 5;  background: transparent; }
 #landmarkCanvas { z-index: 10; background: transparent; }
 
-/* Remote canvas must stay UNMIRRORED (UNCHANGED) */
+/* Remote canvas stays UNMIRRORED (UNCHANGED) */
 #remoteCanvas,
 .remote-drawing-canvas {
     position: absolute;
@@ -432,7 +416,7 @@ button {
     justify-content: center;
     height: 100%;
     min-height: 120px;
-    color: #858b92;
+    color: #93a0b0;
 }
 
 .participant-avatar {
@@ -442,7 +426,7 @@ button {
 
 
 /* ============================================================
-   FLOATING AIR CANVAS BUTTON
+   FLOATING AIR CANVAS / REQUEST FAB
    ============================================================ */
 
 .draw-fab {
@@ -454,29 +438,45 @@ button {
     height: 52px;
     border-radius: 50%;
     border: 1px solid var(--border-strong);
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--text);
     font-size: 1.35rem;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
+    box-shadow: 0 10px 26px rgba(15, 40, 90, 0.15);
     transition: background 0.15s ease,
                 border-color 0.15s ease,
+                color 0.15s ease,
                 transform 0.1s ease;
 }
 
 .draw-fab:hover {
-    background: var(--surface-3);
+    background: var(--accent-light);
     border-color: var(--accent);
+    color: var(--accent);
     transform: translateY(-1px);
 }
 
 .draw-fab.active {
-    background: var(--accent-soft);
+    background: var(--accent);
     border-color: var(--accent);
-    color: #cfe0ff;
+    color: #fff;
+}
+
+/* When the participant has NOT yet been granted drawing permission */
+.draw-fab.fab-request {
+    background: var(--accent-light);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.draw-fab.fab-pending {
+    background: var(--surface-3);
+    border-color: var(--border-strong);
+    color: var(--text-muted);
+    cursor: wait;
 }
 
 
@@ -487,12 +487,10 @@ button {
 .popover {
     position: absolute;
     z-index: 65;
-    background: rgba(26, 28, 32, 0.97);
-    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 12px;
-    box-shadow: 0 18px 46px rgba(0, 0, 0, 0.62);
-    -webkit-backdrop-filter: blur(14px);
-    backdrop-filter: blur(14px);
+    box-shadow: 0 18px 44px rgba(15, 40, 90, 0.16);
     animation: popoverIn 0.14s ease-out;
 }
 
@@ -511,7 +509,7 @@ button {
 
 .popover-title {
     font-size: 0.82rem;
-    font-weight: 650;
+    font-weight: 700;
     color: var(--text);
 }
 
@@ -527,7 +525,6 @@ button {
     cursor: pointer;
     transition: background 0.14s ease, color 0.14s ease;
 }
-
 .popover-close:hover {
     background: var(--surface-3);
     color: var(--text);
@@ -587,19 +584,18 @@ button {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #5c636c;
+    background: #b7c0cb;
     transition: background 0.15s ease, box-shadow 0.15s ease;
 }
 
 .switch.on {
-    background: rgba(52, 192, 122, 0.16);
+    background: var(--success-soft);
     border-color: var(--success);
-    color: #7ee2ac;
+    color: #15803d;
 }
-
 .switch.on .switch-dot {
     background: var(--success);
-    box-shadow: 0 0 0 3px rgba(52, 192, 122, 0.22);
+    box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.22);
 }
 
 .color-swatches {
@@ -617,18 +613,16 @@ button {
     border-radius: 50%;
     background: var(--swatch, #00ff00);
     cursor: pointer;
-    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
     transition: transform 0.12s ease,
                 border-color 0.12s ease,
                 box-shadow 0.12s ease;
 }
-
 .color-swatch:hover { transform: scale(1.12); }
-
 .color-swatch.active {
     border-color: var(--accent);
     transform: scale(1.14);
-    box-shadow: 0 0 0 2px rgba(79, 140, 255, 0.35);
+    box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
 .size-options { display: flex; gap: 6px; }
@@ -647,13 +641,11 @@ button {
                 border-color 0.14s ease,
                 color 0.14s ease;
 }
-
 .size-option:hover { background: var(--surface-3); color: var(--text); }
-
 .size-option.active {
     background: var(--accent-soft);
     border-color: var(--accent);
-    color: #cfe0ff;
+    color: var(--accent);
 }
 
 .range {
@@ -673,12 +665,105 @@ button {
     font-size: 0.8rem;
     font-weight: 500;
     cursor: pointer;
-    transition: background 0.14s ease, border-color 0.14s ease;
+    transition: background 0.14s ease,
+                border-color 0.14s ease,
+                color 0.14s ease;
+}
+.popover-action:hover {
+    background: var(--accent-light);
+    border-color: var(--accent);
+    color: var(--accent);
 }
 
-.popover-action:hover {
-    background: var(--surface-3);
+
+/* ---------- DRAWING PERMISSIONS POPOVER ---------- */
+
+.permissions-popover {
+    position: fixed;
+    width: 300px;
+    max-width: calc(100vw - 20px);
+    z-index: 70;
+}
+
+.permissions-content {
+    padding: 6px 12px 12px;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.perm-section-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 10px 0 6px;
+}
+
+.perm-empty {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    padding: 4px 0 8px;
+}
+
+.perm-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    border-radius: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+}
+
+.perm-name {
+    font-size: 0.82rem;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.perm-action {
+    flex: 0 0 auto;
+    padding: 6px 12px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: background 0.14s ease,
+                border-color 0.14s ease,
+                color 0.14s ease,
+                opacity 0.14s ease;
+}
+
+.perm-action-approve {
+    background: var(--accent);
     border-color: var(--accent);
+    color: #fff;
+}
+.perm-action-approve:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+}
+
+.perm-action-remove {
+    background: var(--danger-soft);
+    border-color: var(--danger-soft);
+    color: var(--danger);
+}
+.perm-action-remove:hover {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
+}
+
+.perm-action:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
 }
 
 
@@ -707,19 +792,16 @@ button {
     font-size: 0.82rem;
     text-align: left;
     cursor: pointer;
-    transition: background 0.14s ease;
+    transition: background 0.14s ease, color 0.14s ease;
 }
-
-.more-menu-item:hover { background: var(--surface-3); }
+.more-menu-item:hover {
+    background: var(--accent-light);
+    color: var(--accent);
+}
 
 .more-item-icon { font-size: 0.95rem; width: 18px; text-align: center; }
-
 .more-item-text { flex: 1; }
-
-.more-item-hint {
-    color: var(--text-dim);
-    font-size: 0.68rem;
-}
+.more-item-hint { color: var(--text-dim); font-size: 0.68rem; }
 
 .more-menu-sep {
     height: 1px;
@@ -729,7 +811,7 @@ button {
 
 
 /* ============================================================
-   BOTTOM TOOLBAR  (Zoom-style)
+   BOTTOM TOOLBAR
    ============================================================ */
 
 .meeting-toolbar {
@@ -740,10 +822,8 @@ button {
     gap: 8px;
     height: var(--toolbar-h);
     padding: 0 14px;
-    background: rgba(20, 22, 26, 0.96);
+    background: var(--surface);
     border-top: 1px solid var(--border);
-    -webkit-backdrop-filter: blur(14px);
-    backdrop-filter: blur(14px);
     z-index: 40;
 }
 
@@ -753,7 +833,6 @@ button {
     gap: 6px;
     min-width: 0;
 }
-
 .toolbar-center { justify-self: center; }
 .toolbar-right  { justify-self: end; }
 .toolbar-left   { justify-self: start; }
@@ -781,7 +860,7 @@ button {
 
 .toolbar-btn:hover {
     background: var(--surface-2);
-    border-color: var(--border-strong);
+    border-color: var(--border);
 }
 
 .toolbar-btn:active { transform: translateY(1px); }
@@ -792,18 +871,17 @@ button {
 }
 
 .toolbar-btn.active,
-.toolbar-btn.sharing,
-.toolbar-btn.hand-raised {
-    background: var(--accent-soft);
-    border-color: var(--accent);
-    color: #cfe0ff;
+.toolbar-btn.sharing {
+    background: var(--accent-light);
+    border-color: var(--accent-soft);
+    color: var(--accent);
 }
 
 .toolbar-btn.muted,
 .toolbar-btn.camera-off {
-    background: rgba(217, 72, 72, 0.14);
-    border-color: rgba(217, 72, 72, 0.5);
-    color: #ff9c9c;
+    background: var(--danger-soft);
+    border-color: var(--danger-soft);
+    color: var(--danger);
 }
 
 .toolbar-icon {
@@ -822,7 +900,8 @@ button {
 .toolbar-btn:hover .toolbar-label,
 .toolbar-btn.active .toolbar-label,
 .toolbar-btn.sharing .toolbar-label,
-.toolbar-btn.hand-raised .toolbar-label {
+.toolbar-btn.muted .toolbar-label,
+.toolbar-btn.camera-off .toolbar-label {
     color: inherit;
 }
 
@@ -832,10 +911,8 @@ button {
     color: #fff;
     min-width: 74px;
 }
-
 .toolbar-btn-leave .toolbar-icon,
 .toolbar-btn-leave .toolbar-label { color: #fff; }
-
 .toolbar-btn-leave:hover {
     background: var(--danger-hover);
     border-color: var(--danger-hover);
@@ -862,7 +939,7 @@ button {
     min-width: 16px;
     padding: 1px 4px;
     border-radius: 8px;
-    background: #e44d4d;
+    background: var(--danger);
     color: #fff;
     font-size: 0.6rem;
     line-height: 1.3;
@@ -884,8 +961,8 @@ button {
     display: flex;
     flex-direction: column;
     background: var(--surface);
-    border-left: 1px solid var(--border-strong);
-    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.35);
+    border-left: 1px solid var(--border);
+    box-shadow: -12px 0 30px rgba(15, 40, 90, 0.10);
 }
 
 .side-panel-header {
@@ -900,7 +977,8 @@ button {
 .side-panel-header strong {
     display: block;
     font-size: 0.96rem;
-    font-weight: 600;
+    font-weight: 700;
+    color: var(--text);
 }
 
 .side-panel-subtitle {
@@ -922,7 +1000,6 @@ button {
     cursor: pointer;
     transition: background 0.14s ease, color 0.14s ease;
 }
-
 .side-panel-close:hover {
     background: var(--surface-3);
     color: var(--text);
@@ -969,7 +1046,7 @@ button {
 .chat-message-name {
     font-size: 0.74rem;
     font-weight: 600;
-    color: #dfe2e6;
+    color: var(--text);
 }
 
 .chat-message-time {
@@ -983,13 +1060,16 @@ button {
     padding: 8px 10px;
     background: var(--surface-3);
     border-radius: 7px;
-    color: #eef0f2;
+    color: var(--text);
     font-size: 0.82rem;
     line-height: 1.4;
     word-break: break-word;
 }
 
-.chat-message.mine .chat-message-bubble { background: #315fba; }
+.chat-message.mine .chat-message-bubble {
+    background: var(--accent);
+    color: #fff;
+}
 
 .chat-composer {
     display: flex;
@@ -1006,12 +1086,10 @@ button {
     border: 1px solid var(--border-strong);
     border-radius: 7px;
     outline: none;
-    background: var(--surface-3);
+    background: var(--surface);
     color: var(--text);
 }
-
 .chat-composer input::placeholder { color: var(--text-dim); }
-
 .chat-composer input:focus { border-color: var(--accent); }
 
 .chat-composer button {
@@ -1023,7 +1101,6 @@ button {
     cursor: pointer;
     transition: background 0.14s ease;
 }
-
 .chat-composer button:hover { background: var(--accent-hover); }
 
 
@@ -1040,7 +1117,7 @@ button {
     align-items: center;
     gap: 10px;
     padding: 10px 7px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid var(--border);
 }
 
 .participant-list-avatar {
@@ -1050,10 +1127,10 @@ button {
     place-items: center;
     flex: 0 0 32px;
     border-radius: 50%;
-    background: var(--surface-4);
-    color: #fff;
+    background: var(--accent-soft);
+    color: var(--accent);
     font-size: 0.8rem;
-    font-weight: 600;
+    font-weight: 700;
 }
 
 .participant-list-info { min-width: 0; flex: 1; }
@@ -1063,47 +1140,21 @@ button {
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 0.82rem;
-    color: #f0f1f2;
+    color: var(--text);
+    font-weight: 500;
 }
 
 .participant-list-role {
     margin-top: 2px;
-    color: #858c95;
+    color: var(--text-dim);
     font-size: 0.68rem;
 }
 
 .participant-draw-status {
     flex: 0 0 auto;
-    color: #8faef0;
+    color: var(--accent);
     font-size: 0.66rem;
-}
-
-
-/* ---------- HOST DRAWING PERMISSIONS PANEL ---------- */
-
-#drawingPermissionsPanel {
-    flex: 0 0 auto;
-    background: var(--surface) !important;
-    border: 1px solid var(--border) !important;
-    border-radius: 10px !important;
-    color: var(--text);
-    max-height: 30vh;
-    overflow-y: auto;
-}
-
-#drawingPermissionsPanel button {
-    background: var(--surface-2);
-    color: var(--text);
-    border: 1px solid var(--border-strong);
-    border-radius: 7px;
-    cursor: pointer;
-}
-
-#drawingPermissionsPanel button:hover { background: var(--surface-3); }
-
-#drawingPermissionsPanel button:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
+    font-weight: 600;
 }
 
 
@@ -1113,7 +1164,7 @@ button {
 
 @media (max-width: 900px) {
 
-    :root { --toolbar-h: 62px; }
+    :root { --toolbar-h: 64px; }
 
     .participants-grid {
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -1125,18 +1176,18 @@ button {
         height: 48px;
         padding: 3px 6px;
     }
-
     .toolbar-icon { font-size: 1rem; }
     .toolbar-label { font-size: 0.6rem; }
 
     .toolbar-btn-leave { min-width: 64px; }
 
     .draw-popover { width: 268px; }
+    .permissions-popover { width: 260px; }
 }
 
 @media (max-width: 640px) {
 
-    :root { --header-h: 48px; --toolbar-h: 58px; }
+    :root { --header-h: 50px; --toolbar-h: 60px; }
 
     .meeting-header { padding: 0 10px; }
     .header-sep { display: none; }
@@ -1163,7 +1214,6 @@ button {
         scrollbar-width: none;
         justify-content: flex-start;
     }
-
     .toolbar-center::-webkit-scrollbar { display: none; }
 
     .toolbar-btn {
@@ -1172,10 +1222,8 @@ button {
         padding: 2px 4px;
         flex: 0 0 auto;
     }
-
     .toolbar-icon { font-size: 0.95rem; }
     .toolbar-label { font-size: 0.55rem; }
-
     .toolbar-btn-leave { min-width: 56px; }
 
     .draw-fab {
@@ -1194,4 +1242,5 @@ button {
     }
 
     .more-menu { width: calc(100vw - 20px); }
+    .permissions-popover { width: calc(100vw - 20px); }
 }
