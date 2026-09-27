@@ -4,6 +4,285 @@
 
 "use strict";
 
+/* ============================================================
+ * METRICS MODULE (bundled inline — no HTML changes needed)
+ * ------------------------------------------------------------
+ * Collects REAL runtime measurements for the conference paper.
+ * Nothing here invents values; every sample comes from an actual
+ * timing call in the live code path.
+ *
+ * Public API (exposed as window.AirCanvasMetrics):
+ *   recordGestureLatency(frameTs, appliedTs)
+ *   recordLocalDrawingE2E(startTs, endTs)
+ *   recordRemoteSync(senderWallMs, receiverWallMs)
+ *   recordFrame(ts)
+ *   recordNetworkRTT(ms)
+ *   sampleMemory()
+ *   recordParticipantCount(n)
+ *   attachToPingChannel(sendFn)
+ *   handlePingMessage(msg) -> pong | null
+ *   handlePongMessage(msg)
+ *   getReport() -> JSON object
+ *   downloadReport() / downloadCSV()
+ *   reset()
+ *
+ * Disable by setting window.AIR_CANVAS_METRICS_ENABLED = false
+ * before this file loads.
+ * ============================================================ */
+(function (g) {
+    "use strict";
+    if (g.AirCanvasMetrics) return;
+    if (g.AIR_CANVAS_METRICS_ENABLED === false) {
+        g.AirCanvasMetrics = {
+            recordGestureLatency() {}, recordLocalDrawingE2E() {},
+            recordRemoteSync() {}, recordFrame() {}, recordNetworkRTT() {},
+            sampleMemory() {}, recordParticipantCount() {},
+            attachToPingChannel() {}, handlePingMessage() { return null; },
+            handlePongMessage() {}, getReport() { return {}; },
+            downloadReport() {}, downloadCSV() {}, reset() {},
+            isEnabled() { return false; }
+        };
+        return;
+    }
+
+    const T0 = performance.now();
+    const CAP = 20000; // memory cap per series
+
+    const S = {
+        gi: [],       // gesture_inference_ms
+        del: [],      // drawing_e2e_local_ms
+        cs: [],       // canvas_sync_ms
+        rtt: [],      // network_rtt_ms
+        fps: [],      // {t, fps}
+        mem: [],      // {t, u}
+        pc: [],       // {t, c}
+        fpsWinStart: 0,
+        fpsWinCount: 0,
+        pingSeq: 0,
+        pingPending: new Map(),
+        pingTimer: null,
+        memTimer: null,
+        pingSend: null,
+        startedWall: Date.now()
+    };
+
+    function push(a, v) {
+        if (a.length < CAP) a.push(v);
+        else a[Math.floor(Math.random() * CAP)] = v;
+    }
+    function pct(sorted, p) {
+        if (!sorted.length) return 0;
+        const i = Math.min(sorted.length - 1,
+            Math.max(0, Math.floor((p / 100) * (sorted.length - 1))));
+        return sorted[i];
+    }
+    function stats(a) {
+        if (!a.length) return { count: 0 };
+        const s = [...a].sort((x, y) => x - y);
+        let sum = 0; for (const v of s) sum += v;
+        return {
+            count: s.length,
+            min: s[0],
+            max: s[s.length - 1],
+            mean: sum / s.length,
+            median: pct(s, 50),
+            p95: pct(s, 95),
+            p99: pct(s, 99)
+        };
+    }
+
+    // ---- Recorders ----
+
+    function recordGestureLatency(frameTs, appliedTs) {
+        const d = appliedTs - frameTs;
+        if (Number.isFinite(d) && d >= 0) push(S.gi, d);
+    }
+    function recordLocalDrawingE2E(startTs, endTs) {
+        const d = endTs - startTs;
+        if (Number.isFinite(d) && d >= 0) push(S.del, d);
+    }
+    function recordRemoteSync(senderWallMs, receiverWallMs) {
+        const d = receiverWallMs - senderWallMs;
+        // Filter obvious clock-skew outliers (>60 s) — they cannot
+        // represent a real canvas update.
+        if (Number.isFinite(d) && d >= 0 && d < 60000) push(S.cs, d);
+    }
+    function recordFrame(ts) {
+        if (S.fpsWinStart === 0) { S.fpsWinStart = ts; S.fpsWinCount = 1; return; }
+        S.fpsWinCount++;
+        const dt = ts - S.fpsWinStart;
+        if (dt >= 1000) {
+            push(S.fps, { t: ts - T0, fps: (S.fpsWinCount * 1000) / dt });
+            S.fpsWinStart = ts;
+            S.fpsWinCount = 1;
+        }
+    }
+    function recordNetworkRTT(v) {
+        if (Number.isFinite(v) && v >= 0 && v < 30000) push(S.rtt, v);
+    }
+    function sampleMemory() {
+        try {
+            const m = performance.memory;
+            if (!m) return;
+            push(S.mem, { t: performance.now() - T0, u: m.usedJSHeapSize });
+        } catch (_) {}
+    }
+    function recordParticipantCount(c) {
+        push(S.pc, { t: performance.now() - T0, c: Number(c) || 0 });
+    }
+
+    // ---- Ping channel ----
+
+    function attachToPingChannel(sendFn) {
+        S.pingSend = sendFn;
+        if (S.pingTimer) clearInterval(S.pingTimer);
+        S.pingTimer = setInterval(() => {
+            if (!S.pingSend) return;
+            const seq = ++S.pingSeq;
+            const ts = Date.now();
+            S.pingPending.set(seq, ts);
+            try { S.pingSend({ type: "_mtx_ping", seq, w: ts }); } catch (_) {}
+            const cutoff = Date.now() - 30000;
+            for (const [k, v] of S.pingPending) if (v < cutoff) S.pingPending.delete(k);
+        }, 5000);
+        if (!S.memTimer) {
+            S.memTimer = setInterval(sampleMemory, 1000);
+            sampleMemory();
+        }
+    }
+    function handlePingMessage(m) {
+        if (!m || m.type !== "_mtx_ping") return null;
+        return { type: "_mtx_pong", seq: m.seq, w: m.w };
+    }
+    function handlePongMessage(m) {
+        if (!m || m.type !== "_mtx_pong") return;
+        const sent = S.pingPending.get(m.seq);
+        if (sent != null) {
+            S.pingPending.delete(m.seq);
+            recordNetworkRTT(Date.now() - sent);
+        }
+    }
+
+    // ---- Report / export ----
+
+    function getReport() {
+        const fpsVals = S.fps.map(s => s.fps);
+        return {
+            schema: "aircanvas-realtime-metrics/v1",
+            generated_at: new Date().toISOString(),
+            session_started_at: new Date(S.startedWall).toISOString(),
+            session_duration_ms: performance.now() - T0,
+            user_agent: navigator.userAgent,
+            definitions: {
+                gesture_inference_ms:
+                    "Frame capture at onResults → /predict response applied. " +
+                    "Includes network round-trip + server inference.",
+                drawing_e2e_local_ms:
+                    "onResults entry → pixel painted on LOCAL canvas.",
+                canvas_sync_ms:
+                    "Sender Date.now() at draw_data emit → receiver Date.now() " +
+                    "at handleRemoteDraw apply. Exact on a single machine.",
+                network_rtt_ms:
+                    "Round-trip of a 5s heartbeat over the LiveKit data channel.",
+                fps:
+                    "MediaPipe onFrame callback rate in 1-second windows.",
+                memory_samples:
+                    "performance.memory.usedJSHeapSize (Chromium only)."
+            },
+            gesture_inference_ms: stats(S.gi),
+            drawing_e2e_local_ms: stats(S.del),
+            canvas_sync_ms: stats(S.cs),
+            network_rtt_ms: stats(S.rtt),
+            fps: stats(fpsVals),
+            raw: {
+                gesture_inference_ms: [...S.gi],
+                drawing_e2e_local_ms: [...S.del],
+                canvas_sync_ms: [...S.cs],
+                network_rtt_ms: [...S.rtt],
+                fps_samples: [...S.fps],
+                memory_samples: [...S.mem],
+                participant_count_samples: [...S.pc]
+            }
+        };
+    }
+    function dl(name, text, mime) {
+        const b = new Blob([text], { type: mime || "text/plain" });
+        const u = URL.createObjectURL(b);
+        const a = document.createElement("a");
+        a.href = u; a.download = name;
+        document.body.appendChild(a); a.click();
+        setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(u);
+        }, 100);
+    }
+    function downloadReport() {
+        dl(`aircanvas_metrics_${Date.now()}.json`,
+           JSON.stringify(getReport(), null, 2),
+           "application/json");
+    }
+    function downloadCSV() {
+        const rows = ["metric,t_ms,value"];
+        for (const v of S.gi) rows.push(`gesture_inference_ms,,${v}`);
+        for (const v of S.del) rows.push(`drawing_e2e_local_ms,,${v}`);
+        for (const v of S.cs) rows.push(`canvas_sync_ms,,${v}`);
+        for (const v of S.rtt) rows.push(`network_rtt_ms,,${v}`);
+        for (const s of S.fps) rows.push(`fps,${s.t.toFixed(1)},${s.fps.toFixed(2)}`);
+        for (const s of S.mem) rows.push(`mem_used_bytes,${s.t.toFixed(1)},${s.u}`);
+        for (const s of S.pc) rows.push(`participant_count,${s.t.toFixed(1)},${s.c}`);
+        dl(`aircanvas_metrics_${Date.now()}.csv`, rows.join("\n"), "text/csv");
+    }
+    function reset() {
+        S.gi.length = 0; S.del.length = 0; S.cs.length = 0;
+        S.rtt.length = 0; S.fps.length = 0; S.mem.length = 0; S.pc.length = 0;
+        S.fpsWinStart = 0; S.fpsWinCount = 0;
+        S.pingPending.clear();
+    }
+
+    g.AirCanvasMetrics = {
+        recordGestureLatency,
+        recordLocalDrawingE2E,
+        recordRemoteSync,
+        recordFrame,
+        recordNetworkRTT,
+        sampleMemory,
+        recordParticipantCount,
+        attachToPingChannel,
+        handlePingMessage,
+        handlePongMessage,
+        getReport,
+        downloadReport,
+        downloadCSV,
+        reset,
+        isEnabled() { return true; }
+    };
+
+    if (!g.__airCanvasMetricsKeyBound) {
+        g.__airCanvasMetricsKeyBound = true;
+        document.addEventListener("keydown", (e) => {
+            if (e.ctrlKey && e.shiftKey && (e.key === "M" || e.key === "m")) {
+                e.preventDefault();
+                downloadReport();
+            }
+            if (e.ctrlKey && e.shiftKey && e.key === ",") {
+                e.preventDefault();
+                downloadCSV();
+            }
+        });
+        g.downloadAirCanvasMetrics = downloadReport;
+        g.downloadAirCanvasMetricsCSV = downloadCSV;
+    }
+    console.log("📊 AirCanvasMetrics ready — Ctrl+Shift+M = JSON, Ctrl+Shift+, = CSV");
+})(window);
+
+// Convenience alias used throughout this file.
+const Metrics = window.AirCanvasMetrics;
+
+
+// ============================================================
+// CONSTANTS
+// ============================================================
+
 const BACKEND_URL =
     (location.hostname === "localhost" || location.hostname === "127.0.0.1")
         ? "http://localhost:8000"
@@ -76,6 +355,11 @@ const participantsList = document.getElementById("participantsList");
 const participantsPanelCount = document.getElementById("participantsPanelCount");
 const participantCount = document.getElementById("participantCount");
 
+
+// ============================================================
+// STATE
+// ============================================================
+
 let chatUnreadCount = 0;
 
 let localStream = null;
@@ -121,6 +405,7 @@ let activeGesture = "no_gesture";
 let activeConfidence = 0;
 let predictionInProgress = false;
 let pendingLandmarks = null;
+let pendingLandmarksFrameTs = null;   // <-- metric: frame capture time
 let lastPredictionTime = 0;
 let lastClearTime = 0;
 
@@ -144,6 +429,11 @@ const userIdToLiveKitIdentity = new Map();
 const liveKitIdentityToUserId = new Map();
 const participantInfo = new Map();
 const pendingRemoteDrawingHistory = new Map();
+
+
+// ============================================================
+// SMALL HELPERS
+// ============================================================
 
 function generateUserId() {
     return "user-" + Date.now().toString(36) + "-" +
@@ -171,6 +461,11 @@ function setConnectionStatus(text) {
     if (connectionStatus) connectionStatus.textContent = `Backend: ${text}`;
 }
 
+
+// ============================================================
+// PARTICIPANT COUNT  (metric hook)
+// ============================================================
+
 function updateParticipantCount() {
     const count = 1 + remoteParticipants.size;
     if (participantCount) participantCount.textContent = String(count);
@@ -179,9 +474,16 @@ function updateParticipantCount() {
         panelCount.textContent =
             `${count} participant${count === 1 ? "" : "s"}`;
     }
+    // Metric: record every time the real participant count changes.
+    Metrics.recordParticipantCount(count);
     renderParticipantsList();
     applyPagination();
 }
+
+
+// ============================================================
+// UI HELPERS
+// ============================================================
 
 function getInitials(name) {
     const value = String(name || "Participant").trim();
@@ -233,6 +535,11 @@ function closeParticipantsPanel() {
         meetingScreen?.classList.remove("side-panel-open");
     }
 }
+
+
+// ============================================================
+// CHAT
+// ============================================================
 
 function appendChatMessage(data) {
     if (!chatMessages) return;
@@ -307,6 +614,11 @@ async function sendChatMessage() {
         chatInput.focus();
     }
 }
+
+
+// ============================================================
+// PARTICIPANTS LIST
+// ============================================================
 
 function renderParticipantsList() {
     if (!participantsList) return;
@@ -414,8 +726,9 @@ function renderParticipantsList() {
     }
 }
 
+
 // ============================================================
-// UI HELPERS
+// LOCAL UI HELPERS
 // ============================================================
 
 function updateLocalUI() {
@@ -436,11 +749,6 @@ function showMeeting() {
     if (meetingScreen) meetingScreen.classList.remove("hidden");
 }
 
-
-// ============================================================
-// CAMERA-OFF OVERLAY (LOCAL)
-// ============================================================
-
 function setLocalCameraOffUI(off) {
     const localCard = participantsGrid
         ? participantsGrid.querySelector('.participant-card[data-identity="local"]')
@@ -455,7 +763,7 @@ function setLocalCameraOffUI(off) {
 
 
 // ============================================================
-// PAGINATION (max 4 desktop / 2 mobile; 3-in-strip when pinned)
+// PAGINATION
 // ============================================================
 
 function getPerPage() {
@@ -654,13 +962,6 @@ function initTheme() {
 
 // ============================================================
 // HOST-ONLY CONTROLS
-//
-// The End Meeting button is host-only.
-//
-// The Draw Access button ("drawingPermissionsButton") is host-only on
-// desktop. On MOBILE we also surface it to non-host users who still
-// need to request drawing access, since we removed the floating
-// "Ask permission to draw" FAB there.
 // ============================================================
 
 function updateHostOnlyControls() {
@@ -679,7 +980,6 @@ function updateHostOnlyControls() {
     }
 }
 
-
 function initializeMeetingPanels() {
     if (chatButton) chatButton.addEventListener("click", openChatPanel);
     if (closeChatButton) closeChatButton.addEventListener("click", closeChatPanel);
@@ -695,6 +995,7 @@ function initializeMeetingPanels() {
 
     updateParticipantCount();
 }
+
 
 // ============================================================
 // FEATURE STYLES
@@ -985,7 +1286,10 @@ function showMeetingNotification(text, opts = {}) {
     }, lifetime);
 }
 
-// ---------- REACTIONS MENU ----------
+
+// ============================================================
+// REACTIONS MENU
+// ============================================================
 
 function ensureReactionsMenu() {
     let menu = document.getElementById("reactionsMenu");
@@ -1092,6 +1396,7 @@ function ensureExtraControls() {
     }
 }
 
+
 // ============================================================
 // MORE MENU
 // ============================================================
@@ -1166,6 +1471,7 @@ function initMoreMenu() {
         });
     }
 }
+
 
 // ============================================================
 // DRAWING TOOL CONTROLS
@@ -1300,6 +1606,7 @@ function initDrawingControls() {
     applyDrawingControlUI();
 }
 
+
 // ============================================================
 // DRAWING PERMISSION REQUEST FLOW
 // ============================================================
@@ -1352,12 +1659,9 @@ function updateRequestDrawUI() {
     }
 }
 
+
 // ============================================================
 // DRAWING PERMISSIONS POPOVER
-//
-// Host: shows the drawing permission list (unchanged).
-// Non-host (mobile only, via Draw Access button): shows an
-// "Ask permission to draw" action.
 // ============================================================
 
 function positionDrawingPermissionsPopover() {
@@ -1425,7 +1729,6 @@ function renderDrawingPermissions() {
         "#drawingPermissionsPopover .popover-title"
     );
 
-    // ---- Toolbar button visibility ----
     const hostBtn = document.getElementById("drawingPermissionsButton");
     if (hostBtn) {
         const isMobile = window.innerWidth <= 640;
@@ -1435,9 +1738,6 @@ function renderDrawingPermissions() {
         hostBtn.classList.toggle("hidden-control", !shouldShow);
     }
 
-    // ============================================================
-    // NON-HOST PATH: "Ask permission to draw"
-    // ============================================================
     if (!isMeetingCreator) {
         if (titleEl) titleEl.textContent = "🎨 Air Canvas Access";
         content.innerHTML = "";
@@ -1483,9 +1783,6 @@ function renderDrawingPermissions() {
         return;
     }
 
-    // ============================================================
-    // HOST PATH (unchanged)
-    // ============================================================
     if (titleEl) titleEl.textContent = "🎨 Drawing Permissions";
     content.innerHTML = "";
 
@@ -1628,8 +1925,9 @@ function renderDrawingPermissions() {
     }
 }
 
+
 // ============================================================
-// PIN / FIT-TO-SCREEN / CARD CONTROLS
+// PIN / FIT / CARD CONTROLS
 // ============================================================
 
 function addCardControls(card, identity) {
@@ -1824,6 +2122,7 @@ function setupLocalCardControls() {
     addCardControls(localCard, "local");
 }
 
+
 // ============================================================
 // HAND RAISE
 // ============================================================
@@ -1866,6 +2165,7 @@ function broadcastRaiseHand(raised) {
         livekit_identity: liveKitIdentity
     });
 }
+
 
 // ============================================================
 // REACTIONS
@@ -1914,8 +2214,9 @@ function sendReaction(emoji) {
     });
 }
 
+
 // ============================================================
-// SCREEN SHARING (UNCHANGED)
+// SCREEN SHARING
 // ============================================================
 
 function isScreenShareTrack(track, publication) {
@@ -2047,6 +2348,7 @@ function broadcastScreenShare(active) {
     });
 }
 
+
 // ============================================================
 // CANVAS AVAILABILITY
 // ============================================================
@@ -2073,6 +2375,7 @@ function updateCanvasAvailability() {
     renderDrawingPermissions();
 }
 
+
 // ============================================================
 // USER ID / NAME
 // ============================================================
@@ -2090,8 +2393,9 @@ if (currentTypedName) {
     if (userNameInput) userNameInput.value = userName;
 }
 
+
 // ============================================================
-// CANVAS HELPERS (UNCHANGED)
+// CANVAS HELPERS
 // ============================================================
 
 function resizeCanvasPreserve(canvas, cssWidth, cssHeight) {
@@ -2153,6 +2457,7 @@ function resizeRemoteCanvas(tile) {
     resizeCanvasPreserve(tile.canvas, rect.width, rect.height);
 }
 
+
 // ============================================================
 // LANDMARK -> CANVAS PIXEL
 // ============================================================
@@ -2212,6 +2517,7 @@ function clearLocalCanvas() {
     lastSentDrawY = null;
     localDrawingHistory = [];
 }
+
 
 // ============================================================
 // REMOTE PARTICIPANT TILES
@@ -2489,6 +2795,7 @@ function detachRemoteTrack(participant, track) {
     detachParticipantTrack(participant, track);
 }
 
+
 // ============================================================
 // CAMERA
 // ============================================================
@@ -2581,8 +2888,9 @@ function stopLocalMedia() {
     if (video) video.srcObject = null;
 }
 
+
 // ============================================================
-// MEDIAPIPE (UNCHANGED)
+// MEDIAPIPE
 // ============================================================
 
 function initMediaPipe() {
@@ -2603,6 +2911,8 @@ function initMediaPipe() {
 
         camera = new Camera(video, {
             onFrame: async () => {
+                // METRIC: FPS measurement — one sample per onFrame call.
+                Metrics.recordFrame(performance.now());
                 if (!video.videoWidth) return;
                 try { await hands.send({ image: video }); }
                 catch (error) {
@@ -2646,6 +2956,9 @@ function onResults(results) {
         updateGestureDisplay("view_only", 0);
         return;
     }
+
+    // METRIC: capture frame arrival time once.
+    const __frameTs = performance.now();
 
     if (landmarkCanvas) {
         const ctx = landmarkCanvas.getContext("2d");
@@ -2692,9 +3005,9 @@ function onResults(results) {
     if (!drawingToolEnabled) {
         resetDrawingState();
     } else if (activeGesture === "draw") {
-        drawGesture(values);
+        drawGesture(values, __frameTs);
     } else if (activeGesture === "erase") {
-        eraseGesture(values);
+        eraseGesture(values, __frameTs);
     } else {
         resetDrawingState();
     }
@@ -2703,6 +3016,9 @@ function onResults(results) {
     if (now - lastPredictionTime >= PREDICTION_INTERVAL_MS) {
         lastPredictionTime = now;
         pendingLandmarks = values;
+        // METRIC: remember the exact time these landmarks were captured
+        // so we can measure frame→prediction latency later.
+        pendingLandmarksFrameTs = __frameTs;
         requestGesturePrediction();
     }
 }
@@ -2711,7 +3027,11 @@ async function requestGesturePrediction() {
     if (predictionInProgress || !pendingLandmarks) return;
     predictionInProgress = true;
     const landmarks = pendingLandmarks;
+    const __frameTs = pendingLandmarksFrameTs != null
+        ? pendingLandmarksFrameTs
+        : performance.now();
     pendingLandmarks = null;
+    pendingLandmarksFrameTs = null;
 
     try {
         const response = await fetch(`${BACKEND_URL}/predict`, {
@@ -2721,6 +3041,11 @@ async function requestGesturePrediction() {
         });
         if (!response.ok) throw new Error(`Prediction HTTP ${response.status}`);
         const result = await response.json();
+
+        // METRIC: gesture inference latency (client-observed).
+        // = (frame capture) → (/predict response applied).
+        // Includes network round-trip + server KNN inference.
+        Metrics.recordGestureLatency(__frameTs, performance.now());
 
         const gesture = String(
             result.confirmed_gesture ||
@@ -2777,11 +3102,12 @@ function resetDrawingState() {
     lastSentDrawY = null;
 }
 
+
 // ============================================================
 // LOCAL DRAWING
 // ============================================================
 
-function drawGesture(values) {
+function drawGesture(values, frameTs) {
     if (!airCanvas) return;
     const lmX = Number(values[16]);
     const lmY = Number(values[17]);
@@ -2815,6 +3141,10 @@ function drawGesture(values) {
             drawingColor,
             drawingThickness / 2 + 1
         );
+        // METRIC: local drawing e2e (client-side portion).
+        if (Number.isFinite(frameTs)) {
+            Metrics.recordLocalDrawingE2E(frameTs, performance.now());
+        }
         return;
     }
 
@@ -2847,11 +3177,16 @@ function drawGesture(values) {
         "draw"
     );
 
+    // METRIC: local drawing e2e (client-side portion).
+    if (Number.isFinite(frameTs)) {
+        Metrics.recordLocalDrawingE2E(frameTs, performance.now());
+    }
+
     lastDrawX = x;
     lastDrawY = y;
 }
 
-function eraseGesture(values) {
+function eraseGesture(values, frameTs) {
     if (!airCanvas) return;
     const lmX = Number(values[16]);
     const lmY = Number(values[17]);
@@ -2876,6 +3211,10 @@ function eraseGesture(values) {
         py / airCanvas.height,
         "erase"
     );
+
+    if (Number.isFinite(frameTs)) {
+        Metrics.recordLocalDrawingE2E(frameTs, performance.now());
+    }
     resetDrawingState();
 }
 
@@ -2975,7 +3314,9 @@ function sendDrawData(x, y, prevX, prevY, action) {
         color: isErase ? null : drawingColor,
         lineWidth: isErase
             ? clamp(Number(eraserSize) || 20, 4, 120)
-            : drawingThickness
+            : drawingThickness,
+        // METRIC: sender wall-clock timestamp for canvas-sync latency.
+        _mtx_sent_at: Date.now()
     };
 
     sendWS(message);
@@ -3027,6 +3368,7 @@ function sendDrawingHistoryTo(targetIdentity) {
     );
 }
 
+
 // ============================================================
 // REMOTE DRAWING
 // ============================================================
@@ -3046,6 +3388,13 @@ function resolveRemoteIdentity(data) {
 function handleRemoteDraw(data) {
     const identity = resolveRemoteIdentity(data);
     if (!identity || identity === liveKitIdentity) return;
+
+    // METRIC: canvas sync latency — sender wall-clock at emit vs receiver
+    // wall-clock at apply. Exact on a single machine; includes clock skew
+    // across machines.
+    if (typeof data._mtx_sent_at === "number") {
+        Metrics.recordRemoteSync(data._mtx_sent_at, Date.now());
+    }
 
     const tile = remoteParticipants.get(identity);
     if (!tile?.canvas) return;
@@ -3097,6 +3446,7 @@ function handleRemoteClear(data) {
     const tile = remoteParticipants.get(identity);
     if (tile) clearCanvasElement(tile.canvas);
 }
+
 
 // ============================================================
 // LIVEKIT DATA
@@ -3150,6 +3500,25 @@ function handleLiveKitData(payload, participant) {
     try {
         const decoded = new TextDecoder().decode(payload);
         const data = JSON.parse(decoded);
+
+        // ---- METRIC PING/PONG (must be handled first) ----
+        if (data && data.type === "_mtx_ping") {
+            const pong = Metrics.handlePingMessage(data);
+            if (pong) {
+                // Reply on the same unreliable control topic.
+                sendLiveKitData(pong, {
+                    reliable: false,
+                    topic: "aircanvas-control"
+                });
+            }
+            return;
+        }
+        if (data && data.type === "_mtx_pong") {
+            Metrics.handlePongMessage(data);
+            return;
+        }
+        // ---- End metric ping/pong ----
+
         const senderIdentity = participant?.identity
             ? String(participant.identity) : "";
 
@@ -3203,6 +3572,7 @@ function handleLiveKitData(payload, participant) {
         console.error("❌ LiveKit data receive failed:", error);
     }
 }
+
 
 // ============================================================
 // WEBSOCKET COMPATIBILITY
@@ -3623,6 +3993,7 @@ function disconnectWebSocket() {
     ws = null;
 }
 
+
 // ============================================================
 // LIVEKIT SDK LOADING
 // ============================================================
@@ -3655,6 +4026,7 @@ function loadLiveKitSDK() {
 
     return liveKitSDKPromise;
 }
+
 
 // ============================================================
 // LIVEKIT
@@ -3825,6 +4197,11 @@ async function connectLiveKit() {
     console.log("✅ LIVEKIT CONNECTED:", liveKitIdentity);
     liveKitDataReady = true;
 
+    // ---- METRIC: attach the RTT heartbeat channel ----
+    Metrics.attachToPingChannel((msg) =>
+        sendLiveKitData(msg, { reliable: false, topic: "aircanvas-control" })
+    );
+
     participantInfo.clear();
     liveKitRoom.remoteParticipants.forEach((participant) => {
         createRemoteTile(participant);
@@ -3892,6 +4269,7 @@ function disconnectLiveKit() {
     liveKitConnected = false;
     clearRemoteTiles();
 }
+
 
 // ============================================================
 // MEETING FLOW
@@ -3988,6 +4366,7 @@ async function joinMeeting() {
         alert("Could not join the meeting. Check the Meeting ID and browser console.");
     }
 }
+
 
 // ============================================================
 // CONTROLS
@@ -4195,6 +4574,7 @@ async function endMeetingForAll() {
     }
 }
 
+
 // ============================================================
 // BUTTONS
 // ============================================================
@@ -4222,8 +4602,6 @@ meetingIdInput?.addEventListener("keydown", (event) => {
 let __resizeTimer = null;
 window.addEventListener("resize", () => {
     setupCanvasSizes();
-
-    // Recompute mobile/desktop visibility for the Draw Access button.
     updateHostOnlyControls();
 
     const moreMenu = document.getElementById("moreMenu");
@@ -4254,6 +4632,7 @@ window.addEventListener("beforeunload", () => {
     try { localStream?.getTracks().forEach((track) => track.stop()); } catch (_) {}
     try { screenShareTrack?.stop(); } catch (_) {}
 });
+
 
 // ============================================================
 // INITIALIZE
@@ -4289,6 +4668,8 @@ function initializeApplication() {
     if (homeScreen) homeScreen.classList.remove("hidden");
 
     console.log("🚀 Air Canvas initialized.");
+    console.log("📊 Metrics: press Ctrl+Shift+M to download JSON report, " +
+                "Ctrl+Shift+, for CSV.");
 }
 
 if (document.readyState === "loading") {
