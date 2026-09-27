@@ -40,7 +40,6 @@ const meetingIdDisplay = document.getElementById("meetingIdDisplay");
 const meetingIdLarge = document.getElementById("meetingIdLarge");
 const copyMeetingId = document.getElementById("copyMeetingId");
 // connectionStatus element was removed from the visible header.
-// Kept as a null-safe lookup so nothing breaks.
 const connectionStatus = document.getElementById("connectionStatus");
 const localParticipantLabel = document.getElementById("localParticipantLabel");
 const remoteParticipantLabel = document.getElementById("remoteParticipantLabel");
@@ -169,7 +168,6 @@ function clamp(value, min, max) {
 }
 
 function setConnectionStatus(text) {
-    // Badge removed from UI. Kept as a no-op for compatibility.
     if (connectionStatus) connectionStatus.textContent = `Backend: ${text}`;
 }
 
@@ -440,18 +438,22 @@ function showMeeting() {
 
 
 // ============================================================
-// PAGINATION (max 4 on desktop, max 2 on mobile)
+// PAGINATION (max 4 desktop / 2 mobile; 3-in-strip when pinned)
 // ============================================================
 
 function getPerPage() {
     return window.innerWidth <= 640 ? 2 : 4;
 }
 
+function isMobileView() {
+    return window.innerWidth <= 640;
+}
+
 function updatePaginationUI(page, totalPages) {
     const bar = document.getElementById("paginationBar");
     if (!bar) return;
 
-    if (pinnedIdentity || totalPages <= 1) {
+    if (totalPages <= 1) {
         bar.classList.add("hidden");
         return;
     }
@@ -469,9 +471,74 @@ function updatePaginationUI(page, totalPages) {
 function applyPagination() {
     if (!participantsGrid) return;
 
-    const cards = [...participantsGrid.querySelectorAll(".participant-card")];
+    const allCards = [...participantsGrid.querySelectorAll(".participant-card")];
+
+    // ---------- PINNED MODE ----------
+    if (pinnedIdentity) {
+        const pinnedCard = allCards.find(
+            (c) => String(c.dataset.identity || "") === pinnedIdentity
+        );
+
+        if (!pinnedCard) {
+            // Pinned card gone: fall back to normal layout
+            pinnedIdentity = null;
+            participantsGrid.classList.remove("has-pinned");
+            return applyPagination();
+        }
+
+        // Pinned card is never hidden by pagination.
+        pinnedCard.classList.remove("page-hidden");
+        pinnedCard.classList.remove("grid-span-2");
+        allCards.forEach((c) => c.classList.remove("grid-span-2"));
+
+        if (isMobileView()) {
+            // Mobile pinned: only the pinned card is fully visible;
+            // the local card (if not the pinned one) becomes a
+            // floating self-view thumbnail via CSS.
+            allCards.forEach((c) => {
+                if (c === pinnedCard) {
+                    c.classList.remove("page-hidden");
+                } else if (c.dataset.identity === "local") {
+                    c.classList.remove("page-hidden"); // shown as thumb
+                } else {
+                    c.classList.add("page-hidden");
+                }
+            });
+            // No pagination while pinned on mobile.
+            const bar = document.getElementById("paginationBar");
+            if (bar) bar.classList.add("hidden");
+        } else {
+            // Desktop pinned: paginate the NON-pinned cards in the strip,
+            // 3 per page (one page = 1 pinned + 3 strip = 4 visible).
+            const others = allCards.filter((c) => c !== pinnedCard);
+            const perPage = 3;
+            const totalPages = Math.max(1, Math.ceil(others.length / perPage));
+
+            if (currentPage > totalPages) currentPage = totalPages;
+            if (currentPage < 1) currentPage = 1;
+
+            const start = (currentPage - 1) * perPage;
+            const end = start + perPage;
+
+            others.forEach((card, i) => {
+                const visible = i >= start && i < end;
+                card.classList.toggle("page-hidden", !visible);
+            });
+
+            updatePaginationUI(currentPage, totalPages);
+        }
+
+        participantsGrid.setAttribute("data-count", "pinned");
+
+        requestAnimationFrame(() => {
+            try { setupCanvasSizes(); } catch (_) {}
+        });
+        return;
+    }
+
+    // ---------- NORMAL MODE (nothing pinned) ----------
     const perPage = getPerPage();
-    const totalPages = Math.max(1, Math.ceil(cards.length / perPage));
+    const totalPages = Math.max(1, Math.ceil(allCards.length / perPage));
 
     if (currentPage > totalPages) currentPage = totalPages;
     if (currentPage < 1) currentPage = 1;
@@ -479,24 +546,22 @@ function applyPagination() {
     const start = (currentPage - 1) * perPage;
     const end = start + perPage;
 
-    cards.forEach((card, i) => {
+    allCards.forEach((card, i) => {
         const visible = i >= start && i < end;
         card.classList.toggle("page-hidden", !visible);
     });
 
-    const visibleCount = Math.min(perPage, Math.max(0, cards.length - start));
+    const visibleCount = Math.min(perPage, Math.max(0, allCards.length - start));
 
-    // Remove grid-span-2 from all cards first
-    cards.forEach((c) => c.classList.remove("grid-span-2"));
+    allCards.forEach((c) => c.classList.remove("grid-span-2"));
 
-    // For 3-tile case on desktop, add grid-span-2 to the last visible card
+    // Desktop 3-tile case: last visible card spans full width on the bottom row.
     const isDesktop = window.innerWidth > 640;
     if (isDesktop && visibleCount === 3) {
-        const visible = cards.slice(start, end);
+        const visible = allCards.slice(start, end);
         if (visible[2]) visible[2].classList.add("grid-span-2");
     }
 
-    // Set data-count so CSS can pick the right grid template
     participantsGrid.setAttribute("data-count", String(visibleCount));
 
     updatePaginationUI(currentPage, totalPages);
@@ -510,7 +575,14 @@ function goToPage(page) {
     const cards = participantsGrid
         ? [...participantsGrid.querySelectorAll(".participant-card")].length
         : 0;
-    const perPage = getPerPage();
+
+    let perPage;
+    if (pinnedIdentity) {
+        perPage = 3; // desktop pinned strip size
+    } else {
+        perPage = getPerPage();
+    }
+
     const totalPages = Math.max(1, Math.ceil(cards / perPage));
     currentPage = clamp(Number(page) || 1, 1, totalPages);
     applyPagination();
@@ -770,9 +842,6 @@ function ensureFeatureStyles() {
             color: var(--accent) !important;
         }
 
-        /* =====================================================
-           VIDEO CARD OVERLAY CONTROLS (Pin / Fit / Restore)
-           ===================================================== */
         .participant-card .card-controls {
             position: absolute;
             top: 8px;
@@ -818,7 +887,6 @@ function ensureFeatureStyles() {
             pointer-events: auto !important;
         }
 
-        /* Native fullscreen card */
         .participant-card:fullscreen,
         .participant-card:-webkit-full-screen {
             width: 100vw;
@@ -1546,6 +1614,7 @@ function applyPinState() {
     if (!participantsGrid) return;
     const cards = participantsGrid.querySelectorAll(".participant-card");
 
+    // Reset pin chrome on all cards
     cards.forEach((card) => {
         card.classList.remove("pinned-card");
         const pinBtn = card.querySelector(".pin-btn");
@@ -1592,7 +1661,6 @@ function applyPinState() {
 function toggleFullscreen(element) {
     if (!element) return;
 
-    // Already in CSS-fit mode → exit it.
     if (element.classList.contains("fit-active")) {
         element.classList.remove("fit-active");
         document.body.classList.remove("has-fit-active");
@@ -1601,7 +1669,6 @@ function toggleFullscreen(element) {
         return;
     }
 
-    // Try native fullscreen first (best experience on desktop).
     let nativeAttempt = null;
     if (element.requestFullscreen) {
         nativeAttempt = element.requestFullscreen();
@@ -1620,8 +1687,6 @@ function toggleFullscreen(element) {
             setTimeout(updateFitButtonVisibility, 100);
         })
         .catch(() => {
-            // Fallback: CSS-based fullscreen. Works on mobile / iOS
-            // where native requestFullscreen is unsupported for divs.
             element.classList.add("fit-active");
             document.body.classList.add("has-fit-active");
             updateFitButtonVisibility();
@@ -1630,13 +1695,11 @@ function toggleFullscreen(element) {
 }
 
 function exitFullscreen() {
-    // Clear CSS-fit
     document.querySelectorAll(".participant-card.fit-active").forEach((card) => {
         card.classList.remove("fit-active");
     });
     document.body.classList.remove("has-fit-active");
 
-    // Clear native fullscreen
     const doc = document;
     if (doc.fullscreenElement && doc.exitFullscreen) {
         doc.exitFullscreen().catch(() => {});
@@ -2020,12 +2083,6 @@ function getVideoCoverTransform() {
     if (!cw || !ch || !vw || !vh) return null;
 
     // Matches the CSS object-fit: contain applied to the video element.
-    // The video is scaled DOWN to fit fully inside the container,
-    // preserving aspect ratio, with equal letterbox bars. Portrait
-    // / mobile videos therefore display completely (no crop) and
-    // hand landmarks stay precisely aligned with what the user sees,
-    // because both the visual fit AND the landmark → pixel math use
-    // the same scale factor.
     const scale = Math.min(cw / vw, ch / vh);
     const dispW = vw * scale;
     const dispH = vh * scale;
