@@ -1523,23 +1523,47 @@ button { -webkit-tap-highlight-color: transparent; }
     .toolbar-btn-leave,
     .toolbar-btn-end { min-width: 56px; }
 
+    /* ---------- Mobile FAB: compact, doesn't cover bottom controls ---------- */
     .draw-fab {
-        width: 46px;
-        height: 46px;
+        width: 38px;
+        height: 38px;
         bottom: 12px;
-        right: 12px;
-        font-size: 1.15rem;
+        right: 10px;
+        font-size: 0.95rem;
     }
+
+    /* Compact request pill on mobile */
     .draw-fab.fab-request {
-        padding: 0 14px 0 10px;
-        font-size: 1rem;
+        width: auto;
+        height: 26px;
+        min-height: 26px;
+        padding: 0 10px 0 7px;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        bottom: 12px;
+        right: 10px;
+        gap: 0;
+    }
+    .draw-fab.fab-request .draw-fab-icon {
+        font-size: 0.72rem;
+        line-height: 1;
     }
     .draw-fab.fab-request .draw-fab-text {
-        font-size: 0.72rem;
-        margin-left: 6px;
+        display: inline-block;
+        margin-left: 4px;
+        font-size: 0.6rem;
+        font-weight: 600;
+        line-height: 1;
     }
+
+    /* Pending (waiting for host) also smaller on mobile */
+    .draw-fab.fab-pending {
+        width: 38px;
+        height: 38px;
+    }
+
     #meetingScreen.side-panel-open .draw-fab {
-        right: calc(min(360px, 92vw) + 12px);
+        right: calc(min(360px, 92vw) + 10px);
     }
 
     .draw-popover {
