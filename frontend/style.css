@@ -380,7 +380,6 @@ button { -webkit-tap-highlight-color: transparent; }
     padding: 4px;
     overflow: hidden;
     box-sizing: border-box;
-    /* no default template — data-count rules below decide it */
 }
 
 .participant-card.page-hidden {
@@ -392,19 +391,16 @@ button { -webkit-tap-highlight-color: transparent; }
 
 @media (min-width: 641px) {
 
-    /* 1 tile — full area */
     .participants-grid[data-count="1"] {
         grid-template-columns: minmax(0, 1fr);
         grid-template-rows: minmax(0, 1fr);
     }
 
-    /* 2 tiles — side by side, full height */
     .participants-grid[data-count="2"] {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         grid-template-rows: minmax(0, 1fr);
     }
 
-    /* 3 tiles — 2 on top + 1 spanning the bottom */
     .participants-grid[data-count="3"] {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         grid-template-rows: 1fr 1fr;
@@ -413,7 +409,6 @@ button { -webkit-tap-highlight-color: transparent; }
         grid-column: 1 / -1;
     }
 
-    /* 4 tiles — clean 2x2 */
     .participants-grid[data-count="4"] {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         grid-template-rows: repeat(2, minmax(0, 1fr));
@@ -578,7 +573,6 @@ button { -webkit-tap-highlight-color: transparent; }
 .participant-card.fit-active .card-controls {
     opacity: 1 !important;
     pointer-events: auto !important;
-    /* keep bottom-anchored in fullscreen too */
     top: auto !important;
     bottom: 20px;
     right: 20px;
@@ -676,17 +670,6 @@ button { -webkit-tap-highlight-color: transparent; }
     transform: none !important;
 }
 
-.waiting-participant {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    min-height: 120px;
-    color: #93a0b0;
-}
-.participant-avatar { font-size: 2.6rem; margin-bottom: 8px; }
-
 
 /* ---------- Camera-off overlay (both local and remote) ---------- */
 
@@ -694,7 +677,8 @@ button { -webkit-tap-highlight-color: transparent; }
     position: absolute;
     inset: 0;
     z-index: 15;
-    display: flex;
+    /* DEFAULT: hidden. Shown only when the parent card has .camera-off. */
+    display: none;
     flex-direction: column;
     align-items: center;
     justify-content: center;
@@ -721,12 +705,13 @@ button { -webkit-tap-highlight-color: transparent; }
     color: #b9c3cf;
 }
 
-/* When a card has .camera-off, hide the live video and show overlay */
+/* When a card is in the camera-off state, hide the video and
+   show the overlay. When the class is removed, the reverse happens. */
 .participant-card.camera-off video {
     visibility: hidden;
 }
 .participant-card.camera-off .camera-off-overlay {
-    display: flex !important;
+    display: flex;
 }
 
 
@@ -827,7 +812,6 @@ button { -webkit-tap-highlight-color: transparent; }
     color: #fff;
 }
 
-/* The text is hidden by default. It shows only in request mode. */
 .draw-fab-text {
     display: none;
     font-size: 0.8rem;
@@ -835,7 +819,6 @@ button { -webkit-tap-highlight-color: transparent; }
     white-space: nowrap;
 }
 
-/* Request mode: expand into a pill and show text */
 .draw-fab.fab-request {
     width: auto;
     padding: 0 18px 0 14px;
@@ -849,7 +832,6 @@ button { -webkit-tap-highlight-color: transparent; }
     margin-left: 8px;
 }
 
-/* Pending (waiting for host) keeps the circle but dims */
 .draw-fab.fab-pending {
     background: var(--surface-3);
     border-color: var(--border-strong);
@@ -857,7 +839,6 @@ button { -webkit-tap-highlight-color: transparent; }
     cursor: wait;
 }
 
-/* Shift the FAB out of the way when a side panel is open */
 #meetingScreen.side-panel-open .draw-fab {
     right: calc(min(360px, 92vw) + 16px);
 }
