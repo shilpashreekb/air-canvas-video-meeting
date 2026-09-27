@@ -1,5 +1,5 @@
 /* ============================================================
-   AIR CANVAS MEETING — Professional light-blue / white theme
+   AIR CANVAS MEETING — Light + Dark themes
    ============================================================ */
 
 *,
@@ -10,42 +10,72 @@
     box-sizing: border-box;
 }
 
-:root {
-    /* surfaces */
-    --bg:            #eff3f9;
-    --surface:       #ffffff;
-    --surface-2:     #f5f8fc;
-    --surface-3:     #e8eef7;
-    --surface-4:     #d8e3f0;
+/* ---------- LIGHT THEME (default) ---------- */
+body,
+body[data-theme="light"] {
+    --bg:              #eff3f9;
+    --surface:         #ffffff;
+    --surface-2:       #f5f8fc;
+    --surface-3:       #e8eef7;
+    --surface-4:       #d8e3f0;
 
-    /* borders */
-    --border:        #e1e7ef;
-    --border-strong: #cbd5e0;
+    --border:          #e1e7ef;
+    --border-strong:   #cbd5e0;
 
-    /* text */
-    --text:          #1a2430;
-    --text-muted:    #5c6b7c;
-    --text-dim:      #8b98a8;
+    --text:            #1a2430;
+    --text-muted:      #5c6b7c;
+    --text-dim:        #8b98a8;
 
-    /* accent */
-    --accent:        #2563eb;
-    --accent-hover:  #1d4ed8;
-    --accent-soft:   #dbeafe;
-    --accent-light:  #eff6ff;
+    --accent:          #2563eb;
+    --accent-hover:    #1d4ed8;
+    --accent-soft:     #dbeafe;
+    --accent-light:    #eff6ff;
 
-    /* states */
-    --danger:        #dc2626;
-    --danger-hover:  #b91c1c;
-    --danger-soft:   #fee2e2;
-    --success:       #16a34a;
-    --success-soft:  #dcfce7;
+    --danger:          #dc2626;
+    --danger-hover:    #b91c1c;
+    --danger-soft:     #fee2e2;
+    --success:         #16a34a;
+    --success-soft:    #dcfce7;
 
-    /* video tile background */
-    --video-bg:      #0f1419;
+    --video-bg:        #0f1419;
 
-    /* layout */
-    --header-h:      54px;
-    --toolbar-h:     70px;
+    --header-h:        54px;
+    --toolbar-h:       70px;
+
+    --shadow:          0 18px 44px rgba(15, 40, 90, 0.14);
+    --shadow-soft:     0 10px 26px rgba(15, 40, 90, 0.10);
+}
+
+/* ---------- DARK THEME ---------- */
+body[data-theme="dark"] {
+    --bg:              #0f1419;
+    --surface:         #1a1f28;
+    --surface-2:       #232a35;
+    --surface-3:       #2d3642;
+    --surface-4:       #3a4453;
+
+    --border:          rgba(255, 255, 255, 0.08);
+    --border-strong:   rgba(255, 255, 255, 0.16);
+
+    --text:            #e8ecf1;
+    --text-muted:      #9aa5b5;
+    --text-dim:        #6b7785;
+
+    --accent:          #4f8cff;
+    --accent-hover:    #3d7cf5;
+    --accent-soft:     rgba(79, 140, 255, 0.20);
+    --accent-light:    rgba(79, 140, 255, 0.12);
+
+    --danger:          #ef4444;
+    --danger-hover:    #dc2626;
+    --danger-soft:     rgba(239, 68, 68, 0.20);
+    --success:         #22c55e;
+    --success-soft:    rgba(34, 197, 94, 0.20);
+
+    --video-bg:        #0a0e13;
+
+    --shadow:          0 18px 44px rgba(0, 0, 0, 0.55);
+    --shadow-soft:     0 10px 26px rgba(0, 0, 0, 0.45);
 }
 
 html, body { height: 100%; }
@@ -56,6 +86,7 @@ body {
     color: var(--text);
     overflow: hidden;
     -webkit-font-smoothing: antialiased;
+    transition: background 0.20s ease, color 0.20s ease;
 }
 
 button, input { font: inherit; }
@@ -63,6 +94,44 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .hidden { display: none !important; }
 .hidden-control { display: none !important; }
+
+
+/* ============================================================
+   THEME TOGGLE
+   ============================================================ */
+
+.theme-toggle-btn {
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease,
+                border-color 0.15s ease,
+                transform 0.1s ease;
+    box-shadow: var(--shadow-soft);
+}
+
+.theme-toggle-btn:hover {
+    border-color: var(--accent);
+    background: var(--accent-light);
+    transform: translateY(-1px);
+}
+
+/* Fixed top-right on the home screen */
+#homeScreen .theme-toggle-btn {
+    position: fixed;
+    top: 18px;
+    right: 18px;
+    z-index: 30;
+}
 
 
 /* ============================================================
@@ -78,7 +147,7 @@ button { -webkit-tap-highlight-color: transparent; }
     padding: 24px;
     background:
         radial-gradient(900px 480px at 50% -10%,
-            rgba(37, 99, 235, 0.10), transparent 65%),
+            var(--accent-light), transparent 65%),
         var(--bg);
 }
 
@@ -90,7 +159,7 @@ button { -webkit-tap-highlight-color: transparent; }
     border: 1px solid var(--border);
     border-radius: 16px;
     text-align: center;
-    box-shadow: 0 18px 50px rgba(15, 40, 90, 0.10);
+    box-shadow: var(--shadow);
 }
 
 .home-brand {
@@ -238,7 +307,6 @@ button { -webkit-tap-highlight-color: transparent; }
     color: var(--text);
     font-size: 0.9rem;
     font-weight: 700;
-    letter-spacing: -0.01em;
     white-space: nowrap;
 }
 
@@ -288,7 +356,11 @@ button { -webkit-tap-highlight-color: transparent; }
     color: var(--text);
 }
 
-.header-right { display: flex; align-items: center; gap: 10px; }
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
 
 .connection-status {
     padding: 4px 10px;
@@ -370,19 +442,19 @@ button { -webkit-tap-highlight-color: transparent; }
     display: block;
 }
 
-/* Local preview: selfie / mirror view (UNCHANGED) */
+/* Local preview: selfie / mirror view — UNCHANGED */
 .video-container video {
     transform: scaleX(-1);
 }
 
-/* Remote video: match speaker's selfie orientation (UNCHANGED) */
+/* Remote video: match speaker's selfie orientation — UNCHANGED */
 .remote-video-container video {
     transform: scaleX(-1) !important;
     visibility: visible;
     opacity: 1;
 }
 
-/* Local canvases mirrored with video (UNCHANGED) */
+/* Local canvases mirrored with video — UNCHANGED */
 .video-container canvas {
     position: absolute;
     top: 0;
@@ -396,7 +468,7 @@ button { -webkit-tap-highlight-color: transparent; }
 #airCanvas      { z-index: 5;  background: transparent; }
 #landmarkCanvas { z-index: 10; background: transparent; }
 
-/* Remote canvas stays UNMIRRORED (UNCHANGED) */
+/* Remote canvas stays UNMIRRORED — UNCHANGED */
 #remoteCanvas,
 .remote-drawing-canvas {
     position: absolute;
@@ -426,7 +498,7 @@ button { -webkit-tap-highlight-color: transparent; }
 
 
 /* ============================================================
-   FLOATING AIR CANVAS / REQUEST FAB
+   FLOATING FAB
    ============================================================ */
 
 .draw-fab {
@@ -445,7 +517,7 @@ button { -webkit-tap-highlight-color: transparent; }
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 10px 26px rgba(15, 40, 90, 0.15);
+    box-shadow: var(--shadow-soft);
     transition: background 0.15s ease,
                 border-color 0.15s ease,
                 color 0.15s ease,
@@ -465,7 +537,6 @@ button { -webkit-tap-highlight-color: transparent; }
     color: #fff;
 }
 
-/* When the participant has NOT yet been granted drawing permission */
 .draw-fab.fab-request {
     background: var(--accent-light);
     border-color: var(--accent);
@@ -481,7 +552,7 @@ button { -webkit-tap-highlight-color: transparent; }
 
 
 /* ============================================================
-   POPOVERS (shared)
+   POPOVERS
    ============================================================ */
 
 .popover {
@@ -490,13 +561,13 @@ button { -webkit-tap-highlight-color: transparent; }
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 12px;
-    box-shadow: 0 18px 44px rgba(15, 40, 90, 0.16);
+    box-shadow: var(--shadow);
     animation: popoverIn 0.14s ease-out;
 }
 
 @keyframes popoverIn {
     from { opacity: 0; transform: translateY(6px) scale(0.985); }
-    to   { opacity: 1; transform: translateY(0)   scale(1); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .popover-header {
@@ -584,18 +655,18 @@ button { -webkit-tap-highlight-color: transparent; }
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #b7c0cb;
+    background: var(--text-dim);
     transition: background 0.15s ease, box-shadow 0.15s ease;
 }
 
 .switch.on {
     background: var(--success-soft);
     border-color: var(--success);
-    color: #15803d;
+    color: var(--success);
 }
 .switch.on .switch-dot {
     background: var(--success);
-    box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.22);
+    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.22);
 }
 
 .color-swatches {
@@ -680,7 +751,7 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .permissions-popover {
     position: fixed;
-    width: 300px;
+    width: 320px;
     max-width: calc(100vw - 20px);
     z-index: 70;
 }
@@ -710,7 +781,7 @@ button { -webkit-tap-highlight-color: transparent; }
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
+    gap: 8px;
     padding: 8px 10px;
     margin-bottom: 6px;
     border-radius: 8px;
@@ -724,11 +795,17 @@ button { -webkit-tap-highlight-color: transparent; }
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    flex: 1 1 auto;
+}
+
+.perm-actions {
+    display: flex;
+    gap: 6px;
+    flex: 0 0 auto;
 }
 
 .perm-action {
-    flex: 0 0 auto;
-    padding: 6px 12px;
+    padding: 6px 11px;
     font-size: 0.72rem;
     font-weight: 600;
     border-radius: 999px;
@@ -748,6 +825,17 @@ button { -webkit-tap-highlight-color: transparent; }
 .perm-action-approve:hover {
     background: var(--accent-hover);
     border-color: var(--accent-hover);
+}
+
+.perm-action-reject {
+    background: transparent;
+    border-color: var(--border-strong);
+    color: var(--text-muted);
+}
+.perm-action-reject:hover {
+    background: var(--danger-soft);
+    border-color: var(--danger-soft);
+    color: var(--danger);
 }
 
 .perm-action-remove {
@@ -801,13 +889,6 @@ button { -webkit-tap-highlight-color: transparent; }
 
 .more-item-icon { font-size: 0.95rem; width: 18px; text-align: center; }
 .more-item-text { flex: 1; }
-.more-item-hint { color: var(--text-dim); font-size: 0.68rem; }
-
-.more-menu-sep {
-    height: 1px;
-    margin: 4px 6px;
-    background: var(--border);
-}
 
 
 /* ============================================================
@@ -892,7 +973,6 @@ button { -webkit-tap-highlight-color: transparent; }
 .toolbar-label {
     font-size: 0.65rem;
     font-weight: 500;
-    letter-spacing: 0.01em;
     color: var(--text-muted);
     white-space: nowrap;
 }
@@ -917,6 +997,22 @@ button { -webkit-tap-highlight-color: transparent; }
     background: var(--danger-hover);
     border-color: var(--danger-hover);
 }
+
+.toolbar-btn-end {
+    background: var(--danger-soft);
+    border-color: var(--danger-soft);
+    color: var(--danger);
+    min-width: 74px;
+    margin-right: 4px;
+}
+.toolbar-btn-end .toolbar-icon,
+.toolbar-btn-end .toolbar-label { color: var(--danger); }
+.toolbar-btn-end:hover {
+    background: var(--danger);
+    border-color: var(--danger);
+}
+.toolbar-btn-end:hover .toolbar-icon,
+.toolbar-btn-end:hover .toolbar-label { color: #fff; }
 
 .toolbar-count {
     position: absolute;
@@ -960,12 +1056,14 @@ button { -webkit-tap-highlight-color: transparent; }
     width: min(360px, 92vw);
     display: flex;
     flex-direction: column;
+    min-height: 0;
     background: var(--surface);
     border-left: 1px solid var(--border);
     box-shadow: -12px 0 30px rgba(15, 40, 90, 0.10);
 }
 
 .side-panel-header {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1006,11 +1104,13 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 
-/* ---------- CHAT ---------- */
+/* ---------- CHAT (fixed layout — Send stays visible) ---------- */
 
 .chat-messages {
-    flex: 1;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 14px;
 }
 
@@ -1072,42 +1172,63 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 .chat-composer {
+    flex: 0 0 auto;
     display: flex;
     gap: 8px;
     padding: 11px;
     border-top: 1px solid var(--border);
     background: var(--surface-2);
+    position: relative;
+    z-index: 2;
 }
 
 .chat-composer input {
-    flex: 1;
+    flex: 1 1 auto;
     min-width: 0;
-    padding: 9px 10px;
+    padding: 10px 12px;
     border: 1px solid var(--border-strong);
-    border-radius: 7px;
+    border-radius: 8px;
     outline: none;
     background: var(--surface);
     color: var(--text);
+    font-size: 0.86rem;
+    line-height: 1.2;
 }
 .chat-composer input::placeholder { color: var(--text-dim); }
-.chat-composer input:focus { border-color: var(--accent); }
+.chat-composer input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+}
 
 .chat-composer button {
-    width: 40px;
+    flex: 0 0 42px;
+    width: 42px;
+    height: 42px;
+    align-self: center;
     border: 0;
-    border-radius: 7px;
+    border-radius: 8px;
     background: var(--accent);
     color: #fff;
+    font-size: 1rem;
     cursor: pointer;
-    transition: background 0.14s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.14s ease, transform 0.1s ease;
 }
 .chat-composer button:hover { background: var(--accent-hover); }
+.chat-composer button:active { transform: translateY(1px); }
+.chat-composer button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
 
 
 /* ---------- PARTICIPANTS PANEL ---------- */
 
 .participants-list {
-    flex: 1;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
     padding: 9px 10px 18px;
 }
@@ -1163,7 +1284,6 @@ button { -webkit-tap-highlight-color: transparent; }
    ============================================================ */
 
 @media (max-width: 900px) {
-
     :root { --toolbar-h: 64px; }
 
     .participants-grid {
@@ -1179,14 +1299,14 @@ button { -webkit-tap-highlight-color: transparent; }
     .toolbar-icon { font-size: 1rem; }
     .toolbar-label { font-size: 0.6rem; }
 
-    .toolbar-btn-leave { min-width: 64px; }
+    .toolbar-btn-leave,
+    .toolbar-btn-end { min-width: 64px; }
 
     .draw-popover { width: 268px; }
-    .permissions-popover { width: 260px; }
+    .permissions-popover { width: 280px; }
 }
 
 @media (max-width: 640px) {
-
     :root { --header-h: 50px; --toolbar-h: 60px; }
 
     .meeting-header { padding: 0 10px; }
@@ -1224,7 +1344,8 @@ button { -webkit-tap-highlight-color: transparent; }
     }
     .toolbar-icon { font-size: 0.95rem; }
     .toolbar-label { font-size: 0.55rem; }
-    .toolbar-btn-leave { min-width: 56px; }
+    .toolbar-btn-leave,
+    .toolbar-btn-end { min-width: 56px; }
 
     .draw-fab {
         width: 46px;
