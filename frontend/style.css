@@ -382,15 +382,16 @@ button { -webkit-tap-highlight-color: transparent; }
     box-sizing: border-box;
 }
 
-/* Cards hidden by pagination */
 .participant-card.page-hidden {
     display: none !important;
 }
 
+
 /* ---------- Desktop grid (min width 641px) ---------- */
+
 @media (min-width: 641px) {
 
-    /* Default fallback: 2x2 (also serves data-count=4) */
+    /* Default fallback (also serves data-count=4) */
     .participants-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         grid-template-rows: repeat(2, minmax(0, 1fr));
@@ -408,10 +409,10 @@ button { -webkit-tap-highlight-color: transparent; }
         grid-template-rows: minmax(0, 1fr);
     }
 
-    /* 3 tiles — 2 on top, 3rd spans bottom */
+    /* 3 tiles — 2 on top + 1 spanning the bottom (balanced) */
     .participants-grid[data-count="3"] {
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        grid-template-rows: 1.1fr 1fr;
+        grid-template-rows: 1fr 1fr;
     }
     .participants-grid[data-count="3"] .participant-card.grid-span-2 {
         grid-column: 1 / -1;
@@ -424,7 +425,9 @@ button { -webkit-tap-highlight-color: transparent; }
     }
 }
 
+
 /* ---------- Mobile grid (max width 640px) — 2 tiles per page ---------- */
+
 @media (max-width: 640px) {
     .participants-grid {
         grid-template-columns: minmax(0, 1fr);
@@ -440,29 +443,135 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 
-/* ---------- PINNED VIEW (single full-area card) ---------- */
+/* ============================================================
+   PINNED LAYOUT
+   ============================================================ */
 
-.participants-grid.has-pinned {
-    grid-template-columns: minmax(0, 1fr) !important;
-    grid-template-rows: minmax(0, 1fr) !important;
+/* ------- Desktop pinned: main video + right-side strip ------- */
+
+@media (min-width: 641px) {
+    .participants-grid.has-pinned {
+        display: grid;
+        /* column 1 = main area, column 2 = narrow strip */
+        grid-template-columns: minmax(0, 1fr) clamp(150px, 20vw, 220px);
+        grid-template-rows: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        padding: 4px;
+    }
+
+    /* Base rule: hide every card while pinned … */
+    .participants-grid.has-pinned .participant-card {
+        display: none !important;
+        grid-column: auto;
+        grid-row: auto;
+    }
+
+    /* … then re-show the pinned card as the main video. */
+    .participants-grid.has-pinned .participant-card.pinned-card {
+        display: block !important;
+        grid-column: 1;
+        grid-row: 1 / -1;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 1px var(--accent-soft);
+    }
+
+    /* Other participants become strip tiles in column 2. */
+    .participants-grid.has-pinned .participant-card:not(.pinned-card):not(.page-hidden) {
+        display: block !important;
+        grid-column: 2;
+        /* rows auto-place 1, 2, 3 */
+    }
+
+    /* Contain the video inside the pinned main area. */
+    .participants-grid.has-pinned .pinned-card video,
+    .participants-grid.has-pinned .pinned-card .remote-screenshare-video {
+        object-fit: contain !important;
+        background: #000;
+    }
+
+    /* Make sure strip tiles never look stretched. */
+    .participants-grid.has-pinned .participant-card:not(.pinned-card) video {
+        object-fit: cover;
+    }
+
+    /* Always show the pin/fit controls on the pinned card. */
+    .participants-grid.has-pinned .pinned-card .card-controls {
+        opacity: 1 !important;
+        pointer-events: auto !important;
+    }
 }
-.participants-grid.has-pinned .participant-card {
-    display: none !important;
-}
-.participants-grid.has-pinned .participant-card.pinned-card {
-    display: block !important;
-    grid-column: 1 !important;
-    grid-row: 1 !important;
-    border-color: var(--accent);
-    box-shadow: 0 0 0 1px var(--accent-soft);
-}
-.participants-grid.has-pinned .pinned-card .card-controls {
-    opacity: 1 !important;
-    pointer-events: auto !important;
-}
-.participants-grid.has-pinned .pinned-card video {
-    object-fit: contain !important;
-    background: #000;
+
+
+/* ------- Mobile pinned: full video + small self-view thumbnail ------- */
+
+@media (max-width: 640px) {
+    .participants-grid.has-pinned {
+        display: block;
+        position: relative;
+        padding: 4px;
+    }
+
+    /* Hide everything except the pinned card … */
+    .participants-grid.has-pinned .participant-card {
+        display: none !important;
+    }
+
+    /* … show the pinned card full-area. */
+    .participants-grid.has-pinned .participant-card.pinned-card {
+        display: block !important;
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        bottom: 4px;
+        left: 4px;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 1px var(--accent-soft);
+    }
+
+    .participants-grid.has-pinned .pinned-card video,
+    .participants-grid.has-pinned .pinned-card .remote-screenshare-video {
+        object-fit: contain !important;
+        background: #000;
+    }
+
+    /* … and show the local user's own video as a floating self-view,
+       ONLY when they are not the pinned participant. */
+    .participants-grid.has-pinned .participant-card[data-identity="local"]:not(.pinned-card):not(.page-hidden) {
+        display: block !important;
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        width: 96px;
+        height: 128px;
+        border-radius: 10px;
+        overflow: hidden;
+        border: 2px solid rgba(255, 255, 255, 0.75);
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+        z-index: 30;
+    }
+
+    .participants-grid.has-pinned
+    .participant-card[data-identity="local"]:not(.pinned-card)
+    video {
+        object-fit: cover !important;
+        width: 100% !important;
+        height: 100% !important;
+    }
+
+    .participants-grid.has-pinned
+    .participant-card[data-identity="local"]:not(.pinned-card)
+    .participant-label {
+        bottom: 4px;
+        left: 4px;
+        font-size: 0.6rem;
+        padding: 2px 6px;
+    }
+
+    .participants-grid.has-pinned
+    .participant-card[data-identity="local"]:not(.pinned-card)
+    .card-controls {
+        display: none !important;
+    }
 }
 
 
@@ -555,11 +664,10 @@ button { -webkit-tap-highlight-color: transparent; }
 
 /* ---------------------------------------------------------
    Video display: object-fit contain.
-   Portrait / mobile cameras are shown FULLY (no cropping)
-   with equal letterbox bars on the sides.
-   Landscape cameras similarly fit without cropping.
-   This matches the contain transform in app.js so hand
-   landmarks stay aligned with what the user sees.
+   Portrait / mobile cameras are shown fully with letterbox
+   bars rather than being cropped into square-ish tiles.
+   Matches the contain transform in app.js so hand landmarks
+   stay aligned with what the user sees.
    --------------------------------------------------------- */
 .video-container video,
 .remote-video-container video {
@@ -1199,7 +1307,7 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 
 
-/* ---------- CHAT (fixed layout — Send always visible) ---------- */
+/* ---------- CHAT ---------- */
 
 .chat-messages {
     flex: 1 1 auto;
