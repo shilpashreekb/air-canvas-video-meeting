@@ -26,13 +26,20 @@
  *   downloadReport() / downloadCSV()
  *   reset()
  *
- * Disable by setting window.AIR_CANVAS_METRICS_ENABLED = false
- * before this file loads.
+ * Disable by setting either of these BEFORE this file loads:
+ *   window.ENABLE_METRICS = false
+ *   window.AIR_CANVAS_METRICS_ENABLED = false
  * ============================================================ */
 (function (g) {
     "use strict";
     if (g.AirCanvasMetrics) return;
-    if (g.AIR_CANVAS_METRICS_ENABLED === false) {
+
+    // Two supported switch names for convenience.
+    const __metricsDisabled =
+        g.ENABLE_METRICS === false ||
+        g.AIR_CANVAS_METRICS_ENABLED === false;
+
+    if (__metricsDisabled) {
         g.AirCanvasMetrics = {
             recordGestureLatency() {}, recordLocalDrawingE2E() {},
             recordRemoteSync() {}, recordFrame() {}, recordNetworkRTT() {},
@@ -175,13 +182,21 @@
             user_agent: navigator.userAgent,
             definitions: {
                 gesture_inference_ms:
-                    "Frame capture at onResults → /predict response applied. " +
-                    "Includes network round-trip + server inference.",
+                    "Frame handed to MediaPipe in Camera.onFrame → " +
+                    "/predict response applied in requestGesturePrediction. " +
+                    "Includes MediaPipe hand-landmark processing + " +
+                    "network round-trip to the backend + server-side KNN " +
+                    "inference.",
                 drawing_e2e_local_ms:
                     "onResults entry → pixel painted on LOCAL canvas.",
                 canvas_sync_ms:
-                    "Sender Date.now() at draw_data emit → receiver Date.now() " +
-                    "at handleRemoteDraw apply. Exact on a single machine.",
+                    "Sender Date.now() at draw_data emit → receiver " +
+                    "Date.now() at handleRemoteDraw apply. Uses wall clock " +
+                    "because sender and receiver are different JS realms " +
+                    "and performance.now() origins are not comparable. " +
+                    "Exact when both tabs run on the same machine " +
+                    "(identical wall clock). Across machines it includes " +
+                    "NTP skew; state which setup was used in the paper.",
                 network_rtt_ms:
                     "Round-trip of a 5s heartbeat over the LiveKit data channel.",
                 fps:
@@ -404,6 +419,15 @@ let mediaPipeStarted = false;
 let activeGesture = "no_gesture";
 let activeConfidence = 0;
 let predictionInProgress = false;
+
+// METRIC: FIFO of timestamps captured the moment a frame is handed
+// to MediaPipe (inside Camera.onFrame). In onResults we shift the
+// oldest entry so gesture_inference_ms can include MediaPipe's
+// hand-landmark processing time — matching the paper's definition
+// "frame → MediaPipe → feature extraction → KNN".
+const __mpFrameTsQueue = [];
+const __MP_FRAME_QUEUE_CAP = 8;
+
 let pendingLandmarks = null;
 let pendingLandmarksFrameTs = null;   // <-- metric: frame capture time
 let lastPredictionTime = 0;
@@ -2912,7 +2936,17 @@ function initMediaPipe() {
         camera = new Camera(video, {
             onFrame: async () => {
                 // METRIC: FPS measurement — one sample per onFrame call.
-                Metrics.recordFrame(performance.now());
+                const __tFrameSent = performance.now();
+                Metrics.recordFrame(__tFrameSent);
+
+                // METRIC: pair this frame with the corresponding
+                // onResults call so gesture_inference_ms can include
+                // MediaPipe hand-landmark processing time.
+                __mpFrameTsQueue.push(__tFrameSent);
+                if (__mpFrameTsQueue.length > __MP_FRAME_QUEUE_CAP) {
+                    __mpFrameTsQueue.shift();
+                }
+
                 if (!video.videoWidth) return;
                 try { await hands.send({ image: video }); }
                 catch (error) {
@@ -2951,14 +2985,19 @@ function stopMediaPipeOnly() {
 }
 
 function onResults(results) {
+    // METRIC: pair this result with the timestamp of the frame that
+    // was handed to MediaPipe (see Camera.onFrame). Shift happens
+    // before any early return so the queue stays aligned with the
+    // number of frames MediaPipe actually processed.
+    const __frameTs = __mpFrameTsQueue.length
+        ? __mpFrameTsQueue.shift()
+        : performance.now();
+
     if (!isMeetingCreator && !canvasEnabled) {
         resetDrawingState();
         updateGestureDisplay("view_only", 0);
         return;
     }
-
-    // METRIC: capture frame arrival time once.
-    const __frameTs = performance.now();
 
     if (landmarkCanvas) {
         const ctx = landmarkCanvas.getContext("2d");
@@ -3044,7 +3083,8 @@ async function requestGesturePrediction() {
 
         // METRIC: gesture inference latency (client-observed).
         // = (frame capture) → (/predict response applied).
-        // Includes network round-trip + server KNN inference.
+        // Includes MediaPipe hand-landmark processing + network
+        // round-trip + server KNN inference.
         Metrics.recordGestureLatency(__frameTs, performance.now());
 
         const gesture = String(
